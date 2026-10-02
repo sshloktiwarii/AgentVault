@@ -11,6 +11,7 @@ pnpm-debug.log*
 /build
 /out
 /coverage
+target/
 
 # Environment variables
 .env
