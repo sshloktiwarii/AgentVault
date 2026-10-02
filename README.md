@@ -12,6 +12,8 @@
 > **The ultra-fast, uncrashable flight recorder and transaction layer for autonomous AI coding agents.**
 > Re-architected in pure, memory-safe Rust with persistent OS application data isolation, Reachability GC, Zstandard streaming compression, and native VSCode IDE timeline integration.
 
+> 📖 **New to AgentVault?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for an intuitive introduction.
+
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
@@ -193,6 +195,7 @@ cargo test
 
 ```
 ├── Cargo.toml                  # Rust manifest (agentvault v4.0.0)
+├── README.simple.md            # Plain-English beginner's guide
 ├── src/
 │   ├── main.rs                 # CLI entrypoint and command routing
 │   ├── lib.rs                  # AgentVaultEngine core coordinator
