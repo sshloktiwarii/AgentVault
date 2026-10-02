@@ -73,3 +73,6 @@ ui-ux-pro-max-skill/
 
 # Coverage reports from Jest
 coverage/
+
+# Hyperframes brag video output
+brag-output/

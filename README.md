@@ -11,6 +11,8 @@
 
 > **The uncrashable flight recorder and transaction-rollback hypervisor for autonomous CLI coding agents.**
 
+> 📖 **Not a coding pro?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for a simple explanation without terminal jargon.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue.svg)](https://www.typescriptlang.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
