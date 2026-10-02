@@ -1,34 +1,39 @@
 use anyhow::Result;
-use git2::{Repository, Sort};
+use git2::Repository;
 use std::path::Path;
 
-/// Derives an immutable repository identity hash based on the root commit OID.
-/// If the repository is brand new (no commits) or git discovery fails,
-/// it gracefully falls back to hashing the canonicalized repository path.
+/// Derives an immutable repository identity hash based on the root commit OID via libgit2.
+/// If shallow clone, zero commits, or non-git directory, emits tracing warnings and falls back
+/// to hashing the canonicalized path using Blake3.
 pub fn derive_repo_identity(repo_path: &Path) -> Result<String> {
-    if let Ok(repo) = Repository::discover(repo_path) {
-        if let Ok(mut revwalk) = repo.revwalk() {
-            // Push HEAD or all references to find root commit
-            let _ = revwalk.push_head();
-            let _ = revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE);
+    let canonical_path = dunce::canonicalize(repo_path)
+        .unwrap_or_else(|_| repo_path.to_path_buf());
 
-            for oid_res in revwalk {
-                if let Ok(oid) = oid_res {
-                    if let Ok(commit) = repo.find_commit(oid) {
-                        if commit.parent_count() == 0 {
-                            let root_oid_str = commit.id().to_string();
-                            let hash = blake3::hash(root_oid_str.as_bytes()).to_hex().to_string();
-                            return Ok(hash);
-                        }
+    match Repository::discover(&canonical_path) {
+        Ok(repo) => {
+            if repo.is_shallow() {
+                tracing::warn!("⚠️️ Shallow clone detected. Repo identity may change if unshallowed.");
+            }
+            let mut revwalk = repo.revwalk()?;
+            if revwalk.push_head().is_ok() {
+                let mut root_oid = None;
+                for oid in revwalk {
+                    if let Ok(oid) = oid {
+                        root_oid = Some(oid);
                     }
                 }
+                if let Some(oid) = root_oid {
+                    return Ok(blake3::hash(oid.as_bytes()).to_hex().to_string());
+                }
             }
+            tracing::warn!("⚠️ Git repo has zero commits. Using fragile path-based identity.");
+        }
+        Err(_) => {
+            tracing::warn!("⚠️ Directory is not a Git repo. Using fragile path-based identity. Rename/move will lose history.");
         }
     }
 
-    // Fallback: Hash canonicalized path for uncommitted repo or discovery failure
-    let canonical = dunce::canonicalize(repo_path).unwrap_or_else(|_| repo_path.to_path_buf());
-    let path_str = canonical.to_string_lossy();
-    let hash = blake3::hash(path_str.as_bytes()).to_hex().to_string();
-    Ok(hash)
+    // Fallback: Hash canonical path string
+    let path_str = canonical_path.to_string_lossy();
+    Ok(blake3::hash(path_str.as_bytes()).to_hex().to_string())
 }

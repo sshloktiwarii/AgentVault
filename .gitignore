@@ -12,6 +12,8 @@ pnpm-debug.log*
 /out
 /coverage
 target/
+*.vsix
+vscode-extension/dist/
 
 # Environment variables
 .env

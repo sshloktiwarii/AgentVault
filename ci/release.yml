@@ -1,4 +1,4 @@
-name: GhostBranch Cross-Platform Release
+name: AgentVault Cross-Platform Release
 
 on:
   push:
@@ -20,28 +20,28 @@ jobs:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             use_cross: true
-            archive_name: ghostbranch-x86_64-unknown-linux-musl.tar.gz
-            bin_name: ghostbranch
+            archive_name: agentvault-linux-amd64.tar.gz
+            bin_name: agentvault
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             use_cross: true
-            archive_name: ghostbranch-aarch64-unknown-linux-musl.tar.gz
-            bin_name: ghostbranch
+            archive_name: agentvault-linux-arm64.tar.gz
+            bin_name: agentvault
           - target: x86_64-apple-darwin
             os: macos-13
             use_cross: false
-            archive_name: ghostbranch-x86_64-apple-darwin.tar.gz
-            bin_name: ghostbranch
+            archive_name: agentvault-darwin-amd64.tar.gz
+            bin_name: agentvault
           - target: aarch64-apple-darwin
             os: macos-latest
             use_cross: false
-            archive_name: ghostbranch-aarch64-apple-darwin.tar.gz
-            bin_name: ghostbranch
+            archive_name: agentvault-darwin-arm64.tar.gz
+            bin_name: agentvault
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             use_cross: false
-            archive_name: ghostbranch-x86_64-pc-windows-msvc.zip
-            bin_name: ghostbranch.exe
+            archive_name: agentvault-windows-amd64.zip
+            bin_name: agentvault.exe
 
     steps:
       - name: Checkout repository

@@ -1,47 +1,49 @@
 {
-  "name": "ghostbranch-vscode",
-  "displayName": "GhostBranch Recovery",
-  "description": "Native VSCode timeline and transaction rollback provider for GhostBranch flight recorder",
-  "version": "3.0.0",
-  "publisher": "ghostbranch",
-  "license": "MIT",
-  "engines": {
-    "vscode": "^1.85.0"
+  "name": "agentvault-vscode",
+  "displayName": "AgentVault: AI Safety Net",
+  "description": "Native UI for AgentVault atomic rollbacks and transaction history.",
+  "version": "1.0.0",
+  "publisher": "AgentVault",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Shlok04423/agentvault"
   },
-  "categories": [
-    "Other",
-    "SCM Providers"
-  ],
-  "main": "./out/extension.js",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
   "activationEvents": [
     "onStartupFinished"
   ],
+  "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "ghostbranch.restore",
-        "title": "GhostBranch: Restore Checkpoint"
+        "command": "agentvault.restore",
+        "title": "Restore AgentVault Checkpoint",
+        "icon": "$(history)"
       },
       {
-        "command": "ghostbranch.refreshTimeline",
-        "title": "GhostBranch: Refresh Recovery Timeline"
+        "command": "agentvault.refresh",
+        "title": "Refresh Timeline",
+        "icon": "$(refresh)"
       }
     ],
     "timeline": [
       {
-        "id": "ghostbranch-timeline",
-        "label": "GhostBranch Recovery"
+        "id": "agentvault-timeline",
+        "label": "AgentVault Recovery"
       }
     ]
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "package": "vsce package --allow-missing-repository"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
-    "typescript": "^5.3.3"
+    "@types/node": "18.x",
+    "@types/vscode": "^1.80.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.1.3"
   }
 }

@@ -69,8 +69,8 @@ impl GitEngine {
         let tree_oid = tree_builder.write()?;
         let tree = repo.find_tree(tree_oid)?;
 
-        let sig = Signature::now("GhostBranch Flight Recorder", "ghostbranch@local.internal")?;
-        let message = format!("ghostbranch: checkpoint [{}] trigger: {}", session_id, trigger);
+        let sig = Signature::now("AgentVault Flight Recorder", "agentvault@local.internal")?;
+        let message = format!("agentvault: checkpoint [{}] trigger: {}", session_id, trigger);
 
         let parent_commits: Vec<Commit> = match parent_commit_oid {
             Some(oid) => {
@@ -100,9 +100,9 @@ impl GitEngine {
             &parent_refs,
         )?;
 
-        // Update custom out-of-band reference: refs/ghostbranch/session_<id>/HEAD
-        let ref_name = format!("refs/ghostbranch/session_{}/HEAD", session_id);
-        repo.reference(&ref_name, commit_oid, true, "ghostbranch: update checkpoint ref")?;
+        // Update custom out-of-band reference: refs/agentvault/session_<id>/HEAD
+        let ref_name = format!("refs/agentvault/session_{}/HEAD", session_id);
+        repo.reference(&ref_name, commit_oid, true, "agentvault: update checkpoint ref")?;
 
         Ok(commit_oid)
     }

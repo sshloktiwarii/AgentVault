@@ -14,18 +14,18 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-pub use cas::{CasManifestEntry, CasStore, GcStats, DEFAULT_MAX_CAS_TOTAL_BYTES};
+pub use cas::{reconcile_ref_counts, run_reachability_gc, CasManifestEntry, CasStore, GcStats, DEFAULT_MAX_CAS_TOTAL_BYTES};
 pub use config::{get_app_data_dir, resolve_storage_dir};
 pub use daemon::{FileMetadata, IncrementalIndex, WatcherDaemon};
 pub use db::{CheckpointRecord, Ledger, SessionRecord};
 pub use git::{derive_repo_identity, GitEngine};
-pub use pty::PtySession;
+pub use pty::{sniff_ux_warning, PtySession};
 pub use safety::{verify_safety_conflicts, SafetyLockError};
 pub use server::HookServer;
 
-/// GhostBranch V3 Primary Engine Coordinator
+/// AgentVault V4 Primary Engine Coordinator
 #[derive(Clone)]
-pub struct GhostBranchEngine {
+pub struct AgentVaultEngine {
     pub repo_root: PathBuf,
     pub cas: CasStore,
     pub ledger: Ledger,
@@ -34,10 +34,11 @@ pub struct GhostBranchEngine {
     pub active_session: Arc<Mutex<Option<SessionRecord>>>,
 }
 
-// Backwards-compatibility type alias
-pub type RewindEngine = GhostBranchEngine;
+// Backwards-compatibility type aliases
+pub type GhostBranchEngine = AgentVaultEngine;
+pub type RewindEngine = AgentVaultEngine;
 
-impl GhostBranchEngine {
+impl AgentVaultEngine {
     pub fn new<P: AsRef<Path>>(repo_path: P) -> Result<Self> {
         let repo_root = dunce::canonicalize(repo_path.as_ref())
             .context("Failed to canonicalize repository root")?;
@@ -123,12 +124,15 @@ impl GhostBranchEngine {
 
         let commit_hash_str = commit_oid.to_string();
 
+        let total_mutations = cas_manifest.len() + git_delta_entries.len();
+
         // 5. Insert record into SQLite WAL ledger
-        let checkpoint = self.ledger.insert_checkpoint(
+        let checkpoint = self.ledger.insert_checkpoint_extended(
             session_id,
             &commit_hash_str,
             trigger,
             &cas_manifest,
+            total_mutations,
         )?;
 
         // 6. Update index committed state
@@ -150,6 +154,21 @@ impl GhostBranchEngine {
         let target_idx = session_checkpoints.len().saturating_sub(steps.max(1) + 1);
         let target_checkpoint = &session_checkpoints[target_idx];
 
+        self.apply_rollback(target_checkpoint, &latest.session_id, force)
+    }
+
+    /// Rollback working directory directly to a specific Checkpoint ID
+    pub fn rollback_to_checkpoint_id(&self, checkpoint_id: i64, force: bool) -> Result<CheckpointRecord> {
+        let target_checkpoint = self.ledger.get_checkpoint(checkpoint_id)?
+            .context(format!("Checkpoint #{} not found in ledger", checkpoint_id))?;
+
+        let latest = self.ledger.get_latest_checkpoint()?
+            .context("No checkpoints found to rollback")?;
+
+        self.apply_rollback(&target_checkpoint, &latest.session_id, force)
+    }
+
+    fn apply_rollback(&self, target_checkpoint: &CheckpointRecord, current_session_id: &str, force: bool) -> Result<CheckpointRecord> {
         // 1. Safety conflict check
         let mut latest_hashes = BTreeMap::new();
         {
@@ -163,7 +182,7 @@ impl GhostBranchEngine {
         verify_safety_conflicts(&self.repo_root, &files_to_mutate, &latest_hashes, force)?;
 
         // 2. Compensation checkpoint (makes rollbacks themselves reversible)
-        let _ = self.take_checkpoint(&latest.session_id, "COMPENSATION_PRE_ROLLBACK");
+        let _ = self.take_checkpoint(current_session_id, "COMPENSATION_PRE_ROLLBACK");
 
         // 3. Checkout target Git tree
         let commit_oid = Oid::from_str(&target_checkpoint.git_commit_hash)?;

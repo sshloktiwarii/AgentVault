@@ -34,6 +34,12 @@ impl Ledger {
         };
         ledger.init_schema()?;
 
+        // Reconcile trigger drift on startup immediately
+        {
+            let conn_guard = ledger.conn.lock().unwrap();
+            let _ = crate::cas::reconcile_ref_counts(&conn_guard);
+        }
+
         Ok(ledger)
     }
 
@@ -57,6 +63,8 @@ impl Ledger {
                 git_commit_hash TEXT NOT NULL,
                 trigger_type TEXT NOT NULL,
                 timestamp INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                files_mutated INTEGER DEFAULT 0,
                 FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
 
@@ -72,28 +80,33 @@ impl Ledger {
             CREATE TABLE IF NOT EXISTS cas_blobs (
                 hash TEXT PRIMARY KEY,
                 size_bytes INTEGER NOT NULL,
-                last_referenced_at INTEGER NOT NULL,
-                ref_count INTEGER DEFAULT 0
+                ref_count INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
             CREATE INDEX IF NOT EXISTS idx_checkpoints_session ON checkpoints(session_id);
             CREATE INDEX IF NOT EXISTS idx_manifest_checkpoint ON cas_manifest(checkpoint_id);
-            CREATE INDEX IF NOT EXISTS idx_blobs_last_ref ON cas_blobs(last_referenced_at);
             CREATE INDEX IF NOT EXISTS idx_blobs_ref_count ON cas_blobs(ref_count);
 
-            -- Task 3 Triggers for Reachability Reference Counting
-            CREATE TRIGGER IF NOT EXISTS trg_cas_manifest_insert
+            -- Part 3 Mandated Triggers for Reachability Reference Counting
+            CREATE TRIGGER IF NOT EXISTS increment_blob_ref
             AFTER INSERT ON cas_manifest
             BEGIN
                 UPDATE cas_blobs SET ref_count = ref_count + 1 WHERE hash = NEW.blob_hash;
             END;
 
-            CREATE TRIGGER IF NOT EXISTS trg_cas_manifest_delete
+            CREATE TRIGGER IF NOT EXISTS decrement_blob_ref
             AFTER DELETE ON cas_manifest
             BEGIN
                 UPDATE cas_blobs SET ref_count = ref_count - 1 WHERE hash = OLD.blob_hash;
             END;"
         )?;
+
+        // Non-destructive migrations for existing databases
+        let _ = conn.execute("ALTER TABLE checkpoints ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP", []);
+        let _ = conn.execute("ALTER TABLE checkpoints ADD COLUMN files_mutated INTEGER DEFAULT 0", []);
+        let _ = conn.execute("ALTER TABLE cas_blobs ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP", []);
+
         Ok(())
     }
 
@@ -122,29 +135,46 @@ impl Ledger {
         trigger_type: &str,
         cas_entries: &[CasManifestEntry],
     ) -> Result<CheckpointRecord> {
+        self.insert_checkpoint_extended(session_id, git_commit_hash, trigger_type, cas_entries, cas_entries.len().max(1))
+    }
+
+    pub fn insert_checkpoint_extended(
+        &self,
+        session_id: &str,
+        git_commit_hash: &str,
+        trigger_type: &str,
+        cas_entries: &[CasManifestEntry],
+        files_mutated: usize,
+    ) -> Result<CheckpointRecord> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
 
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
         tx.execute(
-            "INSERT INTO checkpoints (session_id, git_commit_hash, trigger_type, timestamp)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![session_id, git_commit_hash, trigger_type, now],
+            "INSERT INTO checkpoints (session_id, git_commit_hash, trigger_type, timestamp, files_mutated)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![session_id, git_commit_hash, trigger_type, now, files_mutated as i64],
         )?;
 
         let checkpoint_id = tx.last_insert_rowid();
 
+        let created_at: String = tx.query_row(
+            "SELECT COALESCE(created_at, datetime('now')) FROM checkpoints WHERE id = ?1",
+            params![checkpoint_id],
+            |row| row.get(0),
+        ).unwrap_or_else(|_| chrono::Utc::now().to_rfc3339());
+
         for entry in cas_entries {
             // Ensure blob record exists with base ref_count = 0 if new
             tx.execute(
-                "INSERT INTO cas_blobs (hash, size_bytes, last_referenced_at, ref_count)
-                 VALUES (?1, ?2, ?3, 0)
-                 ON CONFLICT(hash) DO UPDATE SET last_referenced_at = ?3",
-                params![entry.blob_hash, entry.size_bytes as i64, now],
+                "INSERT INTO cas_blobs (hash, size_bytes, ref_count)
+                 VALUES (?1, ?2, 0)
+                 ON CONFLICT(hash) DO NOTHING",
+                params![entry.blob_hash, entry.size_bytes as i64],
             )?;
 
-            // Inserting into manifest will fire trg_cas_manifest_insert to increment ref_count
+            // Inserting into manifest will fire increment_blob_ref trigger to increment ref_count
             tx.execute(
                 "INSERT INTO cas_manifest (checkpoint_id, file_path, blob_hash, is_encrypted, is_compressed)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -160,13 +190,15 @@ impl Ledger {
             git_commit_hash: git_commit_hash.to_string(),
             trigger_type: trigger_type.to_string(),
             timestamp: now,
+            created_at,
+            files_mutated,
         })
     }
 
     pub fn get_latest_checkpoint(&self) -> Result<Option<CheckpointRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, session_id, git_commit_hash, trigger_type, timestamp
+            "SELECT id, session_id, git_commit_hash, trigger_type, timestamp, COALESCE(created_at, datetime(timestamp, 'unixepoch')), COALESCE(files_mutated, 0)
              FROM checkpoints ORDER BY id DESC LIMIT 1",
         )?;
 
@@ -178,6 +210,31 @@ impl Ledger {
                 git_commit_hash: row.get(2)?,
                 trigger_type: row.get(3)?,
                 timestamp: row.get(4)?,
+                created_at: row.get(5)?,
+                files_mutated: row.get::<_, i64>(6)? as usize,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_checkpoint(&self, checkpoint_id: i64) -> Result<Option<CheckpointRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, git_commit_hash, trigger_type, timestamp, COALESCE(created_at, datetime(timestamp, 'unixepoch')), COALESCE(files_mutated, 0)
+             FROM checkpoints WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query(params![checkpoint_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(CheckpointRecord {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                git_commit_hash: row.get(2)?,
+                trigger_type: row.get(3)?,
+                timestamp: row.get(4)?,
+                created_at: row.get(5)?,
+                files_mutated: row.get::<_, i64>(6)? as usize,
             }))
         } else {
             Ok(None)
@@ -187,7 +244,7 @@ impl Ledger {
     pub fn get_checkpoints_for_session(&self, session_id: &str) -> Result<Vec<CheckpointRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, session_id, git_commit_hash, trigger_type, timestamp
+            "SELECT id, session_id, git_commit_hash, trigger_type, timestamp, COALESCE(created_at, datetime(timestamp, 'unixepoch')), COALESCE(files_mutated, 0)
              FROM checkpoints WHERE session_id = ?1 ORDER BY id ASC",
         )?;
 
@@ -198,6 +255,8 @@ impl Ledger {
                 git_commit_hash: row.get(2)?,
                 trigger_type: row.get(3)?,
                 timestamp: row.get(4)?,
+                created_at: row.get(5)?,
+                files_mutated: row.get::<_, i64>(6)? as usize,
             })
         })?;
 
@@ -211,7 +270,7 @@ impl Ledger {
     pub fn get_all_checkpoints(&self) -> Result<Vec<CheckpointRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, session_id, git_commit_hash, trigger_type, timestamp
+            "SELECT id, session_id, git_commit_hash, trigger_type, timestamp, COALESCE(created_at, datetime(timestamp, 'unixepoch')), COALESCE(files_mutated, 0)
              FROM checkpoints ORDER BY id ASC",
         )?;
 
@@ -222,6 +281,8 @@ impl Ledger {
                 git_commit_hash: row.get(2)?,
                 trigger_type: row.get(3)?,
                 timestamp: row.get(4)?,
+                created_at: row.get(5)?,
+                files_mutated: row.get::<_, i64>(6)? as usize,
             })
         })?;
 
@@ -267,8 +328,8 @@ impl Ledger {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id FROM checkpoints 
-             WHERE trigger_type != 'COMPENSATION_PRE_ROLLBACK' 
-             ORDER BY id ASC LIMIT ?1",
+             WHERE trigger_type NOT LIKE 'COMPENSATION%' 
+             ORDER BY created_at ASC LIMIT ?1",
         )?;
 
         let rows = stmt.query_map(params![limit as i64], |row| row.get(0))?;
@@ -281,7 +342,7 @@ impl Ledger {
 
     pub fn delete_checkpoint(&self, checkpoint_id: i64) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        // Deleting from checkpoints cascades to cas_manifest, firing trg_cas_manifest_delete
+        // Deleting from checkpoints cascades to cas_manifest, firing decrement_blob_ref trigger
         conn.execute("DELETE FROM checkpoints WHERE id = ?1", params![checkpoint_id])?;
         Ok(())
     }

@@ -3,6 +3,37 @@
 version = 4
 
 [[package]]
+name = "agentvault"
+version = "4.0.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "blake3",
+ "chrono",
+ "clap",
+ "crossbeam-channel",
+ "directories",
+ "dunce",
+ "git2",
+ "ignore",
+ "notify",
+ "once_cell",
+ "portable-pty",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "strip-ansi-escapes",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "zstd",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -525,36 +556,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ghostbranch"
-version = "3.0.0"
-dependencies = [
- "anyhow",
- "axum",
- "blake3",
- "chrono",
- "clap",
- "crossbeam-channel",
- "directories",
- "dunce",
- "git2",
- "ignore",
- "notify",
- "portable-pty",
- "regex",
- "rusqlite",
- "serde",
- "serde_json",
- "strip-ansi-escapes",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
- "zstd",
-]
-
-[[package]]
 name = "git2"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -992,6 +993,15 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
 
 [[package]]
 name = "matchit"
@@ -1714,10 +1724,14 @@ version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
+ "matchers",
  "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "tracing",
  "tracing-core",
  "tracing-log",
 ]

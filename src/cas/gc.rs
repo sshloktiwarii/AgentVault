@@ -11,23 +11,42 @@ pub struct GcStats {
     pub total_remaining_bytes: u64,
 }
 
+/// Reconciles trigger drift that may occur from ungraceful crashes mid-write.
+/// Recalculates true reference counts directly from `cas_manifest` and corrects `cas_blobs.ref_count`.
+pub fn reconcile_ref_counts(conn: &Connection) -> Result<()> {
+    // Fixes crash-induced trigger drift on application startup
+    conn.execute_batch(
+        "UPDATE cas_blobs 
+         SET ref_count = (SELECT COUNT(*) FROM cas_manifest WHERE blob_hash = cas_blobs.hash) 
+         WHERE ref_count != (SELECT COUNT(*) FROM cas_manifest WHERE blob_hash = cas_blobs.hash);"
+    )?;
+    Ok(())
+}
+
 /// Executes Reachability Garbage Collection on Content-Addressable Storage.
 /// Instead of LRU (which corrupts untouched .env files still referenced by older checkpoints),
 /// Reachability GC prunes the oldest non-compensation checkpoints when total size exceeds max_mb.
-/// Cascading deletes trigger automatic decrement of cas_blobs.ref_count.
-/// Blobs with ref_count <= 0 are physically removed and unlinked from the database.
+/// Cascading deletes trigger automatic decrement of cas_blobs.ref_count via SQLite triggers.
+/// Blobs with ref_count <= 0 are physically removed from disk using `std::fs::remove_file`
+/// and only unlinked from the database upon confirmed deletion.
 pub fn run_reachability_gc(max_mb: u64, conn: &Connection, blobs_dir: &Path) -> Result<GcStats> {
+    reconcile_ref_counts(conn)?;
     let max_bytes = max_mb * 1024 * 1024;
     let target_ceiling_bytes = (max_bytes as f64 * 0.80) as u64;
 
-    let mut size_stmt = conn.prepare("SELECT COALESCE(SUM(size_bytes), 0) FROM cas_blobs")
-        .context("Failed to prepare CAS size query")?;
-    let total_size: i64 = size_stmt.query_row([], |row| row.get(0))?;
-    let mut current_size = total_size as u64;
+    let total_size: u64 = conn.query_row(
+        "SELECT COALESCE(SUM(size_bytes), 0) FROM cas_blobs",
+        [],
+        |row| row.get(0),
+    ).context("Failed to query total CAS blob storage size")?;
 
-    let mut count_stmt = conn.prepare("SELECT COUNT(*) FROM cas_blobs")?;
-    let total_blobs: i64 = count_stmt.query_row([], |row| row.get(0)).unwrap_or(0);
+    let total_blobs: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM cas_blobs",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0);
 
+    let mut current_size = total_size;
     let mut stats = GcStats {
         blobs_scanned: total_blobs as usize,
         blobs_evicted: 0,
@@ -39,34 +58,30 @@ pub fn run_reachability_gc(max_mb: u64, conn: &Connection, blobs_dir: &Path) -> 
         return Ok(stats);
     }
 
-    // Iteratively evict oldest non-compensation checkpoints until size drops below target ceiling
+    // Iteratively evict oldest unpinned/non-compensation checkpoints until size drops below target ceiling
     while current_size > target_ceiling_bytes {
-        let mut ckpt_stmt = conn.prepare(
-            "SELECT id FROM checkpoints 
-             WHERE trigger_type != 'COMPENSATION_PRE_ROLLBACK' 
-             ORDER BY id ASC LIMIT 10",
+        // Delete oldest unpinned checkpoints. Triggers will auto-decrement ref_counts.
+        let rows_deleted = conn.execute(
+            "DELETE FROM checkpoints 
+             WHERE id IN (
+                 SELECT id FROM checkpoints 
+                 WHERE trigger_type NOT LIKE 'COMPENSATION%' 
+                 ORDER BY created_at ASC LIMIT 50
+             )",
+            [],
         )?;
-        let ckpt_ids: Vec<i64> = ckpt_stmt.query_map([], |r| r.get(0))?
-            .filter_map(|r| r.ok())
-            .collect();
 
-        if ckpt_ids.is_empty() {
-            // No more non-compensation checkpoints eligible for eviction
+        if rows_deleted == 0 {
+            // No more unpinned checkpoints eligible for eviction
             break;
         }
 
-        for ckpt_id in ckpt_ids {
-            conn.execute("DELETE FROM checkpoints WHERE id = ?1", params![ckpt_id])?;
-        }
-
-        // Query orphaned blobs where ref_count <= 0
-        let mut orphan_stmt = conn.prepare(
-            "SELECT hash, size_bytes FROM cas_blobs WHERE ref_count <= 0"
-        )?;
-        let orphaned: Vec<(String, i64)> = orphan_stmt.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?))
+        // Reap zero-ref blobs
+        let mut stmt = conn.prepare("SELECT hash, size_bytes FROM cas_blobs WHERE ref_count <= 0")?;
+        let orphaned: Vec<(String, i64)> = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?))
         })?
-        .filter_map(|r| r.ok())
+        .filter_map(Result::ok)
         .collect();
 
         if orphaned.is_empty() {
@@ -79,14 +94,23 @@ pub fn run_reachability_gc(max_mb: u64, conn: &Connection, blobs_dir: &Path) -> 
             } else {
                 ("00", hash.as_str())
             };
-            let blob_path = blobs_dir.join(prefix).join(rest);
+            let sharded_path = blobs_dir.join(prefix).join(rest);
+            let direct_path = blobs_dir.join(&hash);
 
+            let blob_path = if sharded_path.exists() {
+                sharded_path
+            } else {
+                direct_path
+            };
+
+            // Implementation physically deletes the file using std::fs::remove_file
             let removed = if blob_path.exists() {
                 fs::remove_file(&blob_path).is_ok()
             } else {
-                true // already missing from filesystem
+                true // file already removed from disk
             };
 
+            // Only if std::fs::remove_file succeeds, execute DELETE FROM cas_blobs WHERE hash = ?
             if removed {
                 conn.execute("DELETE FROM cas_blobs WHERE hash = ?1", params![hash])?;
                 stats.blobs_evicted += 1;

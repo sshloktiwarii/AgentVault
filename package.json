@@ -1,10 +1,10 @@
 {
-  "name": "rewind",
-  "version": "1.0.0",
-  "description": "Zero-configuration flight recorder and transaction-rollback hypervisor for CLI coding agents",
+  "name": "agentvault",
+  "version": "4.0.0",
+  "description": "AgentVault: Zero-configuration flight recorder and transaction-rollback hypervisor for CLI coding agents",
   "main": "dist/index.js",
   "bin": {
-    "rewind": "./dist/index.js"
+    "agentvault": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

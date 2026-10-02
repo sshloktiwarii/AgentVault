@@ -13,7 +13,7 @@ pub const DEFAULT_MAX_CAS_TOTAL_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 
 /// High-performance Content-Addressable Storage (CAS) for untracked secrets and configs.
 /// Stored strictly out-of-band in persistent XDG/OS application data directory
-/// (`com.GhostBranch.GhostBranch/stores/<root_commit_hash>`) to guarantee immunity from OS cache sweepers.
+/// (`com.AgentVault.AgentVault/stores/<root_commit_hash>`) to guarantee immunity from OS cache sweepers.
 #[derive(Debug, Clone)]
 pub struct CasStore {
     pub repo_root: PathBuf,
@@ -101,7 +101,7 @@ impl CasStore {
     }
 
     /// Stores a file into the Content-Addressable Storage with transparent Blake3 hashing
-    /// and mandatory Level 3 Zstandard (zstd) compression for text/code files.
+    /// and mandatory Level 3 Zstandard (zstd) stream compression for files.
     pub fn store_file<P: AsRef<Path>>(&self, abs_path: P) -> Result<Option<CasManifestEntry>> {
         let path = abs_path.as_ref();
         if !path.exists() || !path.is_file() {
@@ -115,23 +115,18 @@ impl CasStore {
             return Ok(None);
         }
 
+        // Stream raw bytes through zstd::stream::Encoder at level 3 before hashing
         let mut file = File::open(path)
             .with_context(|| format!("Failed to open file for CAS storage at {:?}", path))?;
-        let mut raw_bytes = Vec::with_capacity(metadata.len() as usize);
-        file.read_to_end(&mut raw_bytes)?;
+        let mut encoder = zstd::stream::Encoder::new(Vec::new(), 3)
+            .context("Failed to initialize zstd stream encoder")?;
+        std::io::copy(&mut file, &mut encoder)
+            .context("Failed to stream file through zstd encoder")?;
+        let compressed_bytes = encoder.finish()
+            .context("Failed to finalize zstd stream compression")?;
 
-        let hash = blake3::hash(&raw_bytes).to_hex().to_string();
+        let hash = blake3::hash(&compressed_bytes).to_hex().to_string();
         let blob_path = self.get_blob_path(&hash);
-
-        let is_text = is_text_content(&raw_bytes);
-        // Level 3 zstd compression for text content
-        let (write_bytes, is_compressed) = if is_text && raw_bytes.len() > 32 {
-            let compressed = zstd::encode_all(&raw_bytes[..], 3)
-                .context("Failed to compress CAS blob using zstd level 3")?;
-            (compressed, true)
-        } else {
-            (raw_bytes, false)
-        };
 
         // Write blob if not already deduplicated
         if !blob_path.exists() {
@@ -139,7 +134,7 @@ impl CasStore {
                 fs::create_dir_all(parent)?;
             }
             let mut blob_file = File::create(&blob_path)?;
-            blob_file.write_all(&write_bytes)?;
+            blob_file.write_all(&compressed_bytes)?;
 
             #[cfg(unix)]
             {
@@ -176,7 +171,7 @@ impl CasStore {
             blob_hash: hash,
             size_bytes: metadata.len(),
             permissions_mode,
-            is_compressed,
+            is_compressed: true,
             last_modified,
         }))
     }
@@ -220,6 +215,7 @@ impl CasStore {
 }
 
 /// Simple heuristic to identify if buffer contains UTF-8 text (for safe zstd compression)
+#[allow(dead_code)]
 fn is_text_content(bytes: &[u8]) -> bool {
     let check_len = bytes.len().min(1024);
     if check_len == 0 {

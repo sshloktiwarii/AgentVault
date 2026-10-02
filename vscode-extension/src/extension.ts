@@ -4,147 +4,63 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-interface CheckpointEntry {
-    id: number;
-    session_id: string;
-    git_commit_hash: string;
-    trigger_type: string;
-    timestamp: number;
-}
+export function activate(context: vscode.ExtensionContext) {
+    const provider = new AgentVaultTimelineProvider();
+    context.subscriptions.push(vscode.workspace.registerTimelineProvider('agentvault-timeline', provider));
 
-interface GhostBranchStatus {
-    repo_root: string;
-    repo_identity: string;
-    store_path: string;
-    cas_size_bytes: number;
-    latest_checkpoint: CheckpointEntry | null;
-    checkpoints: CheckpointEntry[];
-}
+    context.subscriptions.push(vscode.commands.registerCommand('agentvault.restore', async (item: vscode.TimelineItem) => {
+        if (!item.id) return;
+        const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!cwd) return;
 
-export class GhostBranchTimelineProvider implements vscode.TimelineProvider {
-    readonly id = 'ghostbranch-timeline';
-    readonly label = 'GhostBranch Recovery';
+        const selection = await vscode.window.showWarningMessage(
+            `Restore to AgentVault Checkpoint #${item.id}? This will safely roll back newer agent mutations.`,
+            'Restore', 'Cancel'
+        );
 
-    private _onDidChange = new vscode.EventEmitter<vscode.TimelineChangeEvent>();
-    readonly onDidChange = this._onDidChange.event;
-
-    refresh(): void {
-        this._onDidChange.fire({ reset: true });
-    }
-
-    async provideTimeline(
-        _uri: vscode.Uri,
-        _options: vscode.TimelineOptions,
-        _token: vscode.CancellationToken
-    ): Promise<vscode.Timeline> {
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            return { items: [] };
+        if (selection === 'Restore') {
+            try {
+                await execAsync(`agentvault undo ${item.id} --force`, { cwd });
+                vscode.window.showInformationMessage(`✅ Restored to Checkpoint #${item.id}`);
+                provider.refresh();
+            } catch (error: any) {
+                vscode.window.showErrorMessage(`AgentVault Restore Failed: ${error.message}`);
+            }
         }
+    }));
 
-        const cwd = workspaceFolders[0].uri.fsPath;
+    context.subscriptions.push(vscode.commands.registerCommand('agentvault.refresh', () => provider.refresh()));
+}
+
+class AgentVaultTimelineProvider implements vscode.TimelineProvider {
+    private _onDidChange = new vscode.EventEmitter<vscode.TimelineChangeEvent | undefined>();
+    public readonly onDidChange = this._onDidChange.event;
+    public readonly id = 'agentvault-timeline';
+    public readonly label = 'AgentVault Recovery';
+
+    public refresh() { this._onDidChange.fire(undefined); }
+
+    async provideTimeline(uri: vscode.Uri, options: vscode.TimelineOptions, token: vscode.CancellationToken): Promise<vscode.Timeline | undefined> {
+        const cwd = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!cwd) return undefined;
 
         try {
-            const { stdout } = await execAsync('ghostbranch status --json', { cwd });
-            const status: GhostBranchStatus = JSON.parse(stdout);
+            const { stdout } = await execAsync('agentvault status --json', { cwd });
+            const checkpoints = JSON.parse(stdout);
 
-            const items: vscode.TimelineItem[] = (status.checkpoints || []).map((cp) => {
-                const date = new Date(cp.timestamp * 1000);
-                const shortCommit = cp.git_commit_hash.substring(0, 8);
-                const item = new vscode.TimelineItem(
-                    `Checkpoint #${cp.id}: ${cp.trigger_type}`,
-                    date.getTime()
-                );
-
-                item.description = `Tree: ${shortCommit} | Session: ${cp.session_id.substring(0, 8)}`;
-                item.detail = `Trigger: ${cp.trigger_type}\nCommit: ${cp.git_commit_hash}\nTime: ${date.toLocaleString()}`;
+            const items: vscode.TimelineItem[] = checkpoints.map((cp: any) => {
+                const item = new vscode.TimelineItem(`Checkpoint #${cp.id}`, new Date(cp.created_at).getTime());
+                item.id = cp.id.toString();
+                item.description = `${cp.files_mutated} files mutated (${cp.trigger_type})`;
                 item.iconPath = new vscode.ThemeIcon('history');
-                item.contextValue = 'ghostbranchCheckpoint';
-
-                // Command attached to restore to this checkpoint
-                item.command = {
-                    command: 'ghostbranch.restore',
-                    title: 'Restore Checkpoint',
-                    arguments: [cp.id]
-                };
-
+                item.contextValue = 'agentvaultCheckpoint';
+                item.command = { title: "Restore", command: "agentvault.restore", arguments: [item] };
                 return item;
             });
-
-            // Sort newest first
-            items.sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
-
             return { items };
-        } catch (err: any) {
-            console.error('Failed to query GhostBranch timeline:', err);
-            return { items: [] };
+        } catch (error) {
+            console.error("AgentVault fetch failed", error);
+            return undefined;
         }
     }
 }
-
-export function activate(context: vscode.ExtensionContext): void {
-    const timelineProvider = new GhostBranchTimelineProvider();
-
-    // Register Timeline Provider
-    context.subscriptions.push(
-        vscode.workspace.registerTimelineProvider('ghostbranch-timeline', timelineProvider)
-    );
-
-    // Register Refresh Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ghostbranch.refreshTimeline', () => {
-            timelineProvider.refresh();
-        })
-    );
-
-    // Register Restore Command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('ghostbranch.restore', async (checkpointId?: number) => {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                vscode.window.showErrorMessage('No active workspace folder to execute GhostBranch restore.');
-                return;
-            }
-
-            const targetId = checkpointId ?? await (async () => {
-                const input = await vscode.window.showInputBox({
-                    prompt: 'Enter Checkpoint ID or number of steps to rollback',
-                    placeHolder: '1'
-                });
-                return input ? parseInt(input, 10) : undefined;
-            })();
-
-            if (targetId === undefined || isNaN(targetId)) {
-                return;
-            }
-
-            const confirm = await vscode.window.showWarningMessage(
-                `Are you sure you want to rollback to checkpoint #${targetId}? Uncommitted human edits will be overwritten if conflicting.`,
-                { modal: true },
-                'Rollback & Restore'
-            );
-
-            if (confirm !== 'Rollback & Restore') {
-                return;
-            }
-
-            const cwd = workspaceFolders[0].uri.fsPath;
-
-            try {
-                const { stdout, stderr } = await execAsync(`ghostbranch undo ${targetId} --force`, { cwd });
-                vscode.window.showInformationMessage(`GhostBranch: Restored checkpoint #${targetId} successfully.`);
-                timelineProvider.refresh();
-                if (stdout) {
-                    console.log(stdout);
-                }
-                if (stderr) {
-                    console.warn(stderr);
-                }
-            } catch (err: any) {
-                vscode.window.showErrorMessage(`GhostBranch rollback failed: ${err.message || err}`);
-            }
-        })
-    );
-}
-
-export function deactivate(): void {}

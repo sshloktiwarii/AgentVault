@@ -15,6 +15,8 @@ pub struct CheckpointRecord {
     pub git_commit_hash: String,
     pub trigger_type: String,
     pub timestamp: i64,
+    pub created_at: String,
+    pub files_mutated: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +32,6 @@ pub struct CasManifestRecord {
 pub struct CasBlobRecord {
     pub hash: String,
     pub size_bytes: i64,
-    pub last_referenced_at: i64,
     pub ref_count: i64,
+    pub created_at: String,
 }

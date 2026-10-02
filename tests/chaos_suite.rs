@@ -6,10 +6,10 @@ use std::path::Path;
 use std::time::Instant;
 use tempfile::tempdir;
 
-use ghostbranch::cas::{run_reachability_gc, CasStore};
-use ghostbranch::daemon::{FileMetadata, IncrementalIndex};
-use ghostbranch::db::Ledger;
-use ghostbranch::GhostBranchEngine;
+use agentvault::cas::{run_reachability_gc, CasStore};
+use agentvault::daemon::{FileMetadata, IncrementalIndex};
+use agentvault::db::Ledger;
+use agentvault::AgentVaultEngine;
 
 /// Helper to initialize a mock git repository with an initial commit
 fn init_mock_git_repo<P: AsRef<Path>>(path: P) -> Result<()> {
@@ -43,7 +43,7 @@ fn test_rm_rf_git_survival() -> Result<()> {
     let env_path = repo_path.join(".env");
     fs::write(&env_path, "STRIPE_SECRET_KEY=sk_test_999\nDATABASE_URL=postgres://localhost\n")?;
 
-    let engine = GhostBranchEngine::new(repo_path)?;
+    let engine = AgentVaultEngine::new(repo_path)?;
     let session = engine.start_session("test_agent")?;
 
     // Checkpoint 1: baseline with .env captured in CAS
@@ -74,7 +74,7 @@ fn test_rm_rf_git_survival() -> Result<()> {
         .expect("Manifest must contain .env entry");
 
     // Restore .env directly from out-of-band CAS
-    let cas_entry = ghostbranch::cas::CasManifestEntry {
+    let cas_entry = agentvault::cas::CasManifestEntry {
         relative_path: env_manifest_entry.file_path.clone(),
         blob_hash: env_manifest_entry.blob_hash.clone(),
         size_bytes: 0,
@@ -215,7 +215,7 @@ fn test_pre_tool_hook_race() -> Result<()> {
     let repo_path = temp_repo.path();
     let _ = init_mock_git_repo(repo_path)?;
 
-    let engine = GhostBranchEngine::new(repo_path)?;
+    let engine = AgentVaultEngine::new(repo_path)?;
     let session = engine.start_session("pre_hook_agent")?;
 
     // Simulate 50 rapid file edits

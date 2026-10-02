@@ -9,7 +9,7 @@ pub struct SafetyLockError {
     pub conflicting_files: Vec<PathBuf>,
 }
 
-/// Evaluates if files scheduled for rollback have been modified by a human user outside of Rewind checkpoints
+/// Evaluates if files scheduled for rollback have been modified by a human user outside of AgentVault checkpoints
 pub fn verify_safety_conflicts<P: AsRef<Path>>(
     repo_root: P,
     files_to_mutate: &[PathBuf],

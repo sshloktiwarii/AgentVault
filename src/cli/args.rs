@@ -2,9 +2,9 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "ghostbranch",
-    version = "3.0.0",
-    about = "GhostBranch V3: Production-grade local-first transaction layer & flight recorder for autonomous AI coding agents"
+    name = "agentvault",
+    version = "4.0.0",
+    about = "AgentVault V4: Production-grade local-first transaction layer & flight recorder for autonomous AI coding agents"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -13,7 +13,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Run an AI coding agent inside the GhostBranch flight recorder
+    /// Run an AI coding agent inside the AgentVault flight recorder
     Run {
         /// Target agent CLI executable and arguments
         #[arg(trailing_var_arg = true, required = true)]
@@ -24,23 +24,23 @@ pub enum Commands {
         dangerously_skip_permissions: bool,
     },
 
-    /// Shortcut for: ghostbranch run claude [args...]
+    /// Shortcut for: agentvault run claude [args...]
     Claude {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
 
-    /// Shortcut for: ghostbranch run aider [args...]
+    /// Shortcut for: agentvault run aider [args...]
     Aider {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
 
-    /// Revert the repository working tree by N checkpoints
+    /// Revert the repository working tree by N checkpoints or to a specific Checkpoint ID
     Undo {
-        /// Number of checkpoints to revert (default: 1)
+        /// Number of checkpoints to revert (default: 1) or target Checkpoint ID
         #[arg(default_value_t = 1)]
-        steps: usize,
+        target: i64,
 
         /// Force rollback even if uncommitted manual human edits are detected
         #[arg(short, long)]

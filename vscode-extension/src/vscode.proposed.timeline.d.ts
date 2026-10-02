@@ -4,7 +4,7 @@ declare module 'vscode' {
     export interface TimelineProvider {
         id: string;
         label: string;
-        onDidChange?: vscode.Event<TimelineChangeEvent>;
+        onDidChange?: vscode.Event<TimelineChangeEvent | undefined>;
         provideTimeline(
             uri: vscode.Uri,
             options: TimelineOptions,
@@ -31,6 +31,7 @@ declare module 'vscode' {
     }
 
     export class TimelineItem {
+        id?: string;
         label: string;
         timestamp: number;
         description?: string;

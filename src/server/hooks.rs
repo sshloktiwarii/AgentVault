@@ -64,7 +64,7 @@ impl HookServer {
 }
 
 async fn health_check() -> &'static str {
-    "Rewind Hook Server Active"
+    "AgentVault Hook Server Active"
 }
 
 /// Synchronous Pre-Tool Hook Handler (Solves Flaw #1: Debounced Race Condition)
