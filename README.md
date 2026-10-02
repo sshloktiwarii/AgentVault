@@ -17,8 +17,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg)](https://github.com/Shlok04423/agentvault)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg)](https://github.com/Shlok04423/AgentVault)
+[![CI](https://github.com/Shlok04423/AgentVault/actions/workflows/ci.yml/badge.svg)](https://github.com/Shlok04423/AgentVault/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/Test%20Suite-8%2F8%20Passing-brightgreen.svg)](tests/)
+
 
 ---
 
