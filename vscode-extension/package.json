@@ -1,0 +1,47 @@
+{
+  "name": "ghostbranch-vscode",
+  "displayName": "GhostBranch Recovery",
+  "description": "Native VSCode timeline and transaction rollback provider for GhostBranch flight recorder",
+  "version": "3.0.0",
+  "publisher": "ghostbranch",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "SCM Providers"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ghostbranch.restore",
+        "title": "GhostBranch: Restore Checkpoint"
+      },
+      {
+        "command": "ghostbranch.refreshTimeline",
+        "title": "GhostBranch: Refresh Recovery Timeline"
+      }
+    ],
+    "timeline": [
+      {
+        "id": "ghostbranch-timeline",
+        "label": "GhostBranch Recovery"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}

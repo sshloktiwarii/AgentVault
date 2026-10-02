@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use super::sniff::contains_destructive_pattern;
+use super::sniff::sniff_and_warn_destructive;
 
 pub struct PtySession {
     pub is_running: Arc<AtomicBool>,
@@ -19,11 +19,11 @@ impl PtySession {
     }
 
     /// Spawns the target agent CLI command inside a cross-platform pseudo-terminal.
-    /// Intercepts input streams to trigger emergency checkpoints if destructive patterns are sniffed.
+    /// Sniffs streams with ANSI stripping and emits non-blocking warnings if destructive patterns are seen.
     pub fn run_command<F>(
         &self,
         command_args: &[String],
-        mut on_emergency_checkpoint: F,
+        mut on_background_snapshot: F,
     ) -> Result<i32>
     where
         F: FnMut() + Send + 'static,
@@ -53,7 +53,7 @@ impl PtySession {
         let mut reader = pair.master.try_clone_reader()?;
         let mut writer = pair.master.take_writer()?;
 
-        // Background thread: read from PTY master and write to stdout
+        // Background thread: read from PTY master, sniff stdout for patterns, and write to user stdout
         let is_running_clone = Arc::clone(&self.is_running);
         let stdout_handle = thread::spawn(move || {
             let mut buf = [0u8; 4096];
@@ -62,6 +62,7 @@ impl PtySession {
                 match reader.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
+                        let _ = sniff_and_warn_destructive(&buf[..n]);
                         let _ = stdout.write_all(&buf[..n]);
                         let _ = stdout.flush();
                     }
@@ -70,7 +71,7 @@ impl PtySession {
             }
         });
 
-        // Background thread: read from stdin, sniff for destructive commands, and write to PTY master
+        // Background thread: read from stdin, sniff input buffer, and write to PTY master (non-blocking)
         let is_running_in = Arc::clone(&self.is_running);
         let _stdin_handle = thread::spawn(move || {
             let mut buf = [0u8; 1024];
@@ -79,9 +80,8 @@ impl PtySession {
                 match stdin.read(&mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let input_str = String::from_utf8_lossy(&buf[..n]);
-                        if contains_destructive_pattern(&input_str) {
-                            on_emergency_checkpoint();
+                        if sniff_and_warn_destructive(&buf[..n]) {
+                            on_background_snapshot();
                         }
                         let _ = writer.write_all(&buf[..n]);
                         let _ = writer.flush();
@@ -96,7 +96,6 @@ impl PtySession {
         self.is_running.store(false, Ordering::SeqCst);
 
         let _ = stdout_handle.join();
-        // Stdin handle may be blocked on read, which will terminate with main process
 
         Ok(status.exit_code() as i32)
     }

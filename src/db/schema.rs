@@ -23,6 +23,7 @@ pub struct CasManifestRecord {
     pub file_path: String,
     pub blob_hash: String,
     pub is_encrypted: bool,
+    pub is_compressed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,4 +31,5 @@ pub struct CasBlobRecord {
     pub hash: String,
     pub size_bytes: i64,
     pub last_referenced_at: i64,
+    pub ref_count: i64,
 }

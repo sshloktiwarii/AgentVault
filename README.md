@@ -1,28 +1,28 @@
-# REWIND V2
+# GHOSTBRANCH V3
 
 ```
- ██████╗ ███████╗██╗    ██╗██╗███╗   ██╗██████╗ 
- ██╔══██╗██╔════╝██║    ██║██║████╗  ██║██╔══██╗
- ██████╔╝█████╗  ██║ █╗ ██║██║██╔██╗ ██║██║  ██║
- ██╔══██╗██╔══╝  ██║███╗██║██║██║╚██╗██║██║  ██║
- ██║  ██║███████╗╚███╔███╔╝██║██║ ╚████║██████╔╝
- ╚═╝  ╚═╝╚══════╝ ╚══╝╚══╝ ╚═╝╚═╝  ╚═══╝╚═════╝ 
+  ██████╗ ██╗  ██╗ ██████╗ ███████╗████████╗██████╗ ██████╗  █████╗ ███╗   ██╗ ██████╗██╗  ██╗
+ ██╔════╝ ██║  ██║██╔═══██╗██╔════╝╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗████╗  ██║██╔════╝██║  ██║
+ ██║  ███╗███████║██║   ██║███████╗   ██║   ██████╔╝██████╔╝███████║██╔██╗ ██║██║     ███████║
+ ██║   ██║██╔══██║██║   ██║╚════██║   ██║   ██╔══██╗██╔══██╗██╔══██║██║╚██╗██║██║     ██╔══██║
+ ╚██████╔╝██║  ██║╚██████╔╝███████║   ██║   ██████╔╝██║  ██║██║  ██║██║ ╚████║╚██████╗██║  ██║
+  ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝╚═╝  ╚═╝
 ```
 
 > **The ultra-fast, uncrashable flight recorder and transaction layer for autonomous AI coding agents.**
-> Re-architected in pure, memory-safe Rust for zero-latency execution, atomic rollbacks, and ironclad blast-radius isolation.
+> Re-architected in pure, memory-safe Rust with persistent OS application data isolation, Reachability GC, Zstandard compression, and native VSCode IDE timeline integration.
 
-> 📖 **New to Rewind?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for an intuitive introduction.
+> 📖 **New to GhostBranch?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for an intuitive introduction.
 > 🔍 **Deep Architecture:** Review the [Architectural Autopsy (ARCHITECTURAL_AUTOPSY.md)](./ARCHITECTURAL_AUTOPSY.md) and [System Specification PRD (REWIND_SYSTEM_SPEC_PRD.md)](./REWIND_SYSTEM_SPEC_PRD.md).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg)](https://github.com/Shlok04423/rewind)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg)](https://github.com/Shlok04423/ghostbranch)
 [![Tests](https://img.shields.io/badge/Chaos%20Suite-4%2F4%20Passing-brightgreen.svg)](tests/chaos_suite.rs)
 
 ---
 
-## ⚡ Why Rewind V2?
+## ⚡ Why GhostBranch V3?
 
 Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Codex, Open Interpreter**) execute shell commands with ambient write access. A single rogue command or hallucinated edit can destroy an entire codebase:
 
@@ -30,25 +30,28 @@ Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Co
 * **Loss of untracked secrets:** Accidental overwrites or deletion of `.env`, `.pem`, or local SQLite databases.
 * **The 250ms Debounce Blindspot:** Autonomous agents emit rapid write bursts; asynchronous debouncers fail to capture snapshots before sudden exits or crashes.
 * **Monorepo Stat Thrashing:** Traditional tools walk the entire filesystem using `git add --all`, causing 300ms–1.5s lag spikes.
-* **The `.git/` Blast Radius:** Backups placed inside `.git/` are obliterated if an agent executes `rm -rf .git`.
+* **The Storage Cache Trap:** Storing recovery ledgers in `~/.cache` leaves backups vulnerable to silent OS disk cleanups (macOS Storage Optimizer, `systemd-tmpfiles`).
+* **The Repo Identity Crisis:** Folder renames orphan backups when storage is indexed merely by path strings.
 
-**Rewind V2 fixes all 5 architectural failure modes with a production-grade, zero-dependency Rust engine.**
+**GhostBranch V3 fixes all critical failure modes with an immutable root-commit identity, persistent OS storage, Zstandard compression, Reachability GC, and native IDE integration.**
 
 ---
 
-## 🛡️ The 5 Solved Architectural Flaws
+## 🛡️ Architectural Evolutions (V2 → V3)
 
-| V1 Flaw | V1 Failure Mode | V2 Production Rust Solution |
+| Flaw / Risk | Latent Failure Mode | GhostBranch V3 Production Solution |
 | :--- | :--- | :--- |
-| **1. Debounced Race Condition** | 250ms asynchronous quiet-window lost pre-destruction state during write bursts | **Synchronous Pre-Tool Hook (`POST /api/v1/checkpoint/pre-flight`)** blocks execution until snapshot is committed. Includes zero-overhead PTY stream sniffing for destructive commands (`rm -rf`, `sed -i`, `truncate`). |
-| **2. Monorepo Stat Latency** | `git add --all` forced full filesystem stat walks taking 300ms–1.5s on 50k files | **In-Memory `IncrementalIndex`** updated via native OS events (`notify`: FSEvents, inotify, ReadDirectoryChangesW). Delta hashes 10,000 files in **6.56ms**. |
-| **3. `.git/` Blast Radius** | State stored in `.git/rewind/`; `rm -rf .git` wiped recovery safety net | **Out-of-Band Global Store** in `~/.cache/rewind/stores/<blake3-repo-hash>/`. Even if `.git` is completely deleted, full state & CAS files are safely restored. |
-| **4. Unbounded CAS Disk Bomb** | Continuous snapshots bloated disk storage without ceilings or eviction | **Deterministic LRU Eviction Engine** with configurable budget (e.g. 5GB ceiling), transparent **LZ4 compression**, and automatic background `rewind gc`. |
-| **5. Native Dependency Friction** | `node-pty` / `node-gyp` C++ compilation frequently crashed on Windows | **Pure Rust Static Compilation** using `portable-pty`, bundled `libgit2`, and bundled `rusqlite` for zero-dependency cross-platform distribution. |
+| **Storage Death Trap** | `~/.cache` was silently purged by OS temp sweepers, causing data loss | **Persistent OS App Data Directory** (`directories::ProjectDirs::data_local_dir()`, e.g., `~/Library/Application Support/com.GhostBranch.GhostBranch/` or `~/.local/share/GhostBranch/`). |
+| **Repo Identity Crisis** | Renaming project directories permanently orphaned flight recorder backups | **Root-Commit Identity Derivation** (`git::derive_repo_identity`) hashes the root commit OID via `blake3`, keeping backups permanently attached. |
+| **LRU Data Corruption** | LRU evicted untouched `.env` files still referenced by older valid checkpoints | **SQLite Reference-Counting & Reachability GC** (`ref_count` triggers on `cas_manifest` cascade; only orphaned blobs with `ref_count <= 0` are deleted). |
+| **Suboptimal Compression** | `lz4_flex` wasted disk storage for text-heavy source code and `.env` files | **Mandatory Level 3 Zstandard (`zstd`) Streaming Compression** balancing maximum compression ratios with zero-overhead read/write speeds. |
+| **PTY Sniffer Blocking** | Regex matching on terminal streams was bypassed by ANSI codes and risked blocking | **ANSI-Stripping Decoupled Warning Logger** using `strip-ansi-escapes` and non-blocking `tracing::warn!`. |
+| **IDE Friction** | CLI-only tools require context switching away from VSCode / Cursor | **Native VSCode Extension (`vscode-extension/`)** implementing a custom `vscode.TimelineProvider` with one-click checkpoint rollback. |
+| **Source Compilation** | Users had to install the Rust toolchain and compile locally | **Automated Multi-Arch CI/CD Matrix** building native binaries for 5 OS architectures on tag releases. |
 
 ---
 
-## 🏛️ V2 System Architecture
+## 🏛️ V3 System Architecture
 
 ```
                     +------------------------------------+
@@ -63,42 +66,42 @@ Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Co
          v                                                         v
  [Pre-Flight HTTP Server]                                  [PTY Sniffer Master]
  POST /api/v1/checkpoint/pre-flight                        portable-pty session master
- Blocks agent until committed                              Regex scan: rm -rf, sed -i, truncate
+ Blocks agent until committed                              ANSI-stripped non-blocking warning
          |                                                         |
          +----------------------------+----------------------------+
                                       |
                                       v
                     +------------------------------------+
-                    |        RewindEngine (Rust)         |
+                    |     GhostBranchEngine (Rust)       |
                     +-----------------+------------------+
                                       |
                    +------------------+------------------+
                    |                                     |
                    v                                     v
-       [IncrementalIndex Daemon]                [Global Out-of-Band Store]
-       - notify OS File Watcher                 ~/.cache/rewind/stores/<hash>/
-       - In-memory BTreeMap VFS                 ├── metadata.db (SQLite WAL)
-       - Sub-10ms delta detection               └── cas_objects/ (LZ4 compressed)
+       [IncrementalIndex Daemon]                [Persistent Storage Store]
+       - notify OS File Watcher                 com.GhostBranch.GhostBranch/stores/
+       - In-memory BTreeMap VFS                 ├── metadata.db (SQLite WAL + Triggers)
+       - Sub-10ms delta detection               └── cas_objects/ (zstd Level 3)
                    |                                     |
                    v                                     v
-       [Direct libgit2 ODB Writer]              [Conflict Matrix & GC]
-       - Writes Blobs & Trees directly          - Blake3 pre-rollback safety lock
-       - refs/rewind/<session>/HEAD             - COMPENSATION_PRE_ROLLBACK
-       - Zero index lock contention             - LRU Eviction when size > budget
+       [Direct libgit2 ODB Writer]              [Reachability GC Engine]
+       - Writes Blobs & Trees directly          - SQLite triggers on cas_manifest
+       - refs/ghostbranch/<session>/HEAD        - ref_count tracking on cas_blobs
+       - Zero index lock contention             - Auto-prunes orphaned blobs <= 0
 ```
 
 ---
 
 ## 📦 Installation & Build
 
-### Prerequisites
-* Rust toolchain 1.80+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
+### Option 1: Pre-Compiled Binary
+Download the pre-compiled binary for your architecture from the [GitHub Releases](https://github.com/Shlok04423/ghostbranch/releases).
 
-### Build from Source
+### Option 2: Build from Source
 ```bash
 # Clone the repository
-git clone https://github.com/Shlok04423/rewind.git
-cd rewind
+git clone https://github.com/Shlok04423/ghostbranch.git
+cd ghostbranch
 
 # Build optimized release binary
 cargo build --release
@@ -107,98 +110,107 @@ cargo build --release
 cargo install --path .
 ```
 
-The resulting binary `rewind` is completely self-contained with **zero external shared-library dependencies**.
-
 ---
 
 ## 💻 CLI Commands
 
-### 1. Wrap an Agent with Transparent Flight Recording
-Spawns the agent inside a dedicated PTY with real-time stream sniffing and snapshot isolation:
+### 1. Wrap an Agent with Flight Recording
 ```bash
-rewind run claude
-rewind run aider --model sonnet
-rewind run bash
+ghostbranch run claude
+ghostbranch run aider --model sonnet
+ghostbranch run bash
 ```
 
 ### 2. Manual or Pre-Tool Checkpoint
-Takes an instantaneous sub-10ms snapshot of all modified tracked files and whitelisted sensitive files:
 ```bash
-rewind checkpoint --trigger MANUAL
-rewind checkpoint --trigger PRE_HOOK
+ghostbranch checkpoint --trigger MANUAL
+ghostbranch checkpoint --trigger PRE_HOOK
 ```
 
 ### 3. Atomic Transaction Rollback
-Safely reverts the repository by N steps. Checks the pre-flight conflict matrix to prevent overwriting human edits, and takes a `COMPENSATION_PRE_ROLLBACK` checkpoint for complete undoability:
 ```bash
-# Revert the last step
-rewind undo 1
+# Revert the last checkpoint
+ghostbranch undo 1
 
-# Revert 3 steps, overriding safety conflict warnings if desired
-rewind undo 3 --force
+# Revert 3 checkpoints with forced override
+ghostbranch undo 3 --force
 ```
 
-### 4. Inspect Flight Recorder Status
-Inspect the current session, checkpoint count, and CAS storage metrics:
+### 4. Flight Status (Human-Readable & JSON)
 ```bash
-rewind status
+# Standard status dashboard
+ghostbranch status
+
+# Machine-readable JSON output (used by VSCode extension)
+ghostbranch status --json
 ```
 
-### 5. Deterministic Garbage Collection
-Prune oldest CAS blobs until usage drops below 80% of the maximum budget (default: 5000 MB):
+### 5. Reachability Garbage Collection
 ```bash
-# Run GC with default 5GB limit
-rewind gc
+# Run Reachability GC with default 5GB ceiling
+ghostbranch gc
 
 # Run GC with custom limit
-rewind gc --max-mb 2000
+ghostbranch gc --max-mb 2000
 ```
 
 ### 6. Synchronous Pre-Flight Hook Daemon
-Run the HTTP hook listener for agent extensions (Claude Code, Cursor, MCP):
 ```bash
-rewind serve-hooks --port 7394
+ghostbranch serve-hooks --port 7394
 ```
-Agents call `POST http://127.0.0.1:7394/api/v1/checkpoint/pre-flight` before executing tools; the call blocks synchronously until the snapshot transaction commits.
+
+---
+
+## 🔌 VSCode & Cursor Extension
+
+GhostBranch includes a first-party TypeScript extension providing a native Timeline UI in VSCode and Cursor:
+
+1. Open `vscode-extension/` in your IDE.
+2. Run `npm install && npm run compile`.
+3. Open the **Timeline** view in the Explorer panel to inspect GhostBranch checkpoints in real time.
+4. Click any checkpoint to trigger atomic rollback with an interactive confirmation prompt.
 
 ---
 
 ## 🧪 Chaos Test Suite
 
-Rewind V2 includes an exhaustive integration chaos test suite (`tests/chaos_suite.rs`) verifying each architectural guarantee:
+GhostBranch V3 includes an exhaustive chaos integration test suite (`tests/chaos_suite.rs`):
 
 ```bash
 cargo test --test chaos_suite
 ```
 
-### Test Results
-* ✅ **`test_rm_rf_git_survival`:** Verified that deleting `.git` does not destroy recovery data; out-of-band store successfully restored `.env` and project files.
-* ✅ **`test_10k_file_delta_speed`:** Verified incremental inode index speed; computed delta across 10,000 files in **6.56ms** (well under the 50ms budget).
-* ✅ **`test_pre_tool_hook_race`:** Verified synchronous hook blocking during 50 rapid write bursts, preventing data loss from destructive commands.
-* ✅ **`test_disk_bomb_gc`:** Verified deterministic LRU eviction; pruned 15MB of compressed blobs down to $\le 80\%$ budget ceiling.
+### Verification Results
+* ✅ **`test_rm_rf_git_survival`:** Verified that deleting `.git` leaves recovery data unharmed in persistent OS application directories; `.env` restored bit-for-bit.
+* ✅ **`test_10k_file_delta_speed`:** In-memory incremental inode index computed deltas across 10,000 files in **6.56ms** (<50ms budget).
+* ✅ **`test_pre_tool_hook_race`:** Synchronous pre-flight hook blocked execution during 50 rapid write bursts, preventing data loss from destructive commands.
+* ✅ **`test_reachability_gc`:** Verified reference-counting SQLite triggers; reachability GC pruned oldest checkpoints and unreferenced blobs below budget ceiling.
 
 ---
 
 ## 📁 Repository Structure
 
 ```
-├── Cargo.toml                  # Rust dependencies (git2, rusqlite, notify, blake3, axum)
-├── ARCHITECTURAL_AUTOPSY.md    # In-depth breakdown of V1 flaws and V2 solutions
-├── REWIND_SYSTEM_SPEC_PRD.md   # Complete system specification and PRD
+├── Cargo.toml                  # Rust manifest (ghostbranch v3.0.0)
+├── ARCHITECTURAL_AUTOPSY.md    # Autopsy of V1/V2 flaws and V3 solutions
+├── REWIND_SYSTEM_SPEC_PRD.md   # Complete system specification
 ├── src/
 │   ├── main.rs                 # CLI entrypoint and command routing
-│   ├── lib.rs                  # RewindEngine core transaction coordinator
-│   ├── cas/                    # Content-Addressable Storage (Blake3, LZ4, LRU GC)
+│   ├── lib.rs                  # GhostBranchEngine core coordinator
+│   ├── config/                 # Persistent ProjectDirs resolution & storage paths
+│   ├── cas/                    # Content-Addressable Storage (zstd, Reachability GC)
 │   ├── daemon/                 # IncrementalIndex & notify OS event loop
-│   ├── db/                     # SQLite WAL ledger & transactional schema
-│   ├── git/                    # Direct libgit2 ODB tree/commit writers
-│   ├── pty/                    # portable-pty wrapper & regex stream sniffer
+│   ├── db/                     # SQLite WAL ledger, triggers & ref_count schema
+│   ├── git/                    # Direct libgit2 ODB writers & root-commit identity
+│   ├── pty/                    # portable-pty wrapper & ANSI-stripped stream sniffer
 │   ├── safety/                 # Pre-flight conflict matrix & compensation snapshots
 │   ├── server/                 # Axum HTTP pre-tool interception daemon
-│   └── cli/                    # Clap command line argument definitions
+│   └── cli/                    # Clap subcommand definitions
 ├── tests/
 │   └── chaos_suite.rs          # 4-stage hostile chaos test suite
-└── v1/                         # Archived Node.js/TypeScript research prototype
+├── vscode-extension/           # Native VSCode TimelineProvider extension
+└── .github/workflows/
+    └── release.yml             # 5-architecture cross-compilation release matrix
 ```
 
 ---

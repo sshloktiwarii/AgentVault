@@ -1,10 +1,10 @@
-# Rewind (The Plain-English Guide)
+# GhostBranch (The Plain-English Guide)
 
-> **Think of Rewind as a video game quick-save and "Ctrl+Z" button for AI coding agents.**
+> **Think of GhostBranch as a video game quick-save and "Ctrl+Z" button for AI coding agents.**
 
 If you build apps using tools like **Claude Code, Cursor, Aider, or ChatGPT**, you already know the sinking feeling: you ask the AI to make a small change, and five minutes later your site won't start, your files are scrambled, and your API keys are gone.
 
-You don't need to be a terminal wizard or a Git expert to use Rewind. This guide explains what it does, why it exists, and how to use it in plain language.
+You don't need to be a terminal wizard or a Git expert to use GhostBranch. This guide explains what it does, why it exists, and how to use it in plain language.
 
 ---
 
@@ -21,99 +21,62 @@ If you don't know advanced Git commands like `git reflog`, `git reset --hard`, o
 
 ---
 
-## 🛡️ What Rewind Does
+## 🛡️ What GhostBranch Does
 
-Rewind acts like an **uncrashable black box flight recorder** running silently in the background while your AI works.
+GhostBranch acts like an **uncrashable black box flight recorder** running silently in the background while your AI works.
 
 ```
-       AI makes a change (3:01 PM)  ───► Rewind automatically saves a checkpoint
-       AI makes a change (3:02 PM)  ───► Rewind automatically saves a checkpoint
+       AI makes a change (3:01 PM)  ───► GhostBranch automatically saves a checkpoint
+       AI makes a change (3:02 PM)  ───► GhostBranch automatically saves a checkpoint
        AI deletes your .env (3:03 PM) ───► 💥 DISASTER!
                                                 │
-                                    Type: rewind undo 1
+                                    Type: ghostbranch undo 1
                                                 ▼
        Everything restored to 3:02 PM in 12 milliseconds! ✨
 ```
 
-* **Instant Undo:** Type `rewind undo 1` and your whole project jumps back to before the AI made its mistake.
-* **Saves What Git Forgets:** It automatically protects your `.env` files, local settings, and SQLite databases.
-* **Visual Time Machine:** Type `rewind ui` to open an interactive timeline. You can press the arrow keys to walk backwards through time and see exactly what changed before hitting Enter to restore.
-* **Zero Fear:** Rewind never messes up your real Git history or deletes your branches. It's completely non-destructive.
+* **Instant Undo:** Type `ghostbranch undo 1` and your whole project jumps back to before the AI made its mistake.
+* **Saves What Git Forgets:** It automatically protects your `.env` files, local settings, and SQLite databases using industry-standard Zstandard compression.
+* **Persistent & Safe:** GhostBranch stores your recovery checkpoints safely in your computer's persistent Application Support directory—so computer cleanup tools will never accidentally delete your backups.
+* **Visual Time Machine:** Type `ghostbranch ui` to open an interactive timeline, or use the native VSCode extension to see changes directly inside your editor.
+* **Zero Fear:** GhostBranch never messes up your real Git history or deletes your branches. It's completely non-destructive.
 
 ---
 
-## 🚀 How to Use Rewind in 3 Steps
+## 🚀 How to Use GhostBranch in 3 Steps
 
 ### Step 1: Install
-Open your terminal and install Rewind:
+Download the binary for your operating system or install with Cargo:
 ```bash
-npm install -g rewind
-```
-*(Or clone this repository and run `npm install && npm run build`)*
-
-### Step 2: Start your AI with Rewind
-Instead of running your AI directly, put `rewind run` in front of it:
-
-```bash
-# If you use Claude Code:
-rewind run claude
-
-# If you use Aider:
-rewind run aider
+cargo install --path .
 ```
 
-Now use your AI just like you normally would. Rewind sits in the background, quietly saving a checkpoint every time a file changes.
-
-### Step 3: Hit Undo whenever something goes wrong
-If the AI makes a mess:
-
-#### Option A: Quick Undo
-To undo the last step the AI took:
+### Step 2: Wrap Your Agent
+Instead of running your AI tool directly, put `ghostbranch run` in front of it:
 ```bash
-rewind undo 1
-```
-To undo the last 3 steps:
-```bash
-rewind undo 3
+ghostbranch run claude
+ghostbranch run aider
 ```
 
-#### Option B: The Visual Scrubber (Recommended!)
-If you want to see what you're doing before you undo:
+### Step 3: Undo If Disaster Strikes
+If the AI breaks your code, open a new terminal window in your project folder and type:
 ```bash
-rewind ui
+ghostbranch undo 1
 ```
-You'll see a clean visual dashboard:
-* Use the **Up/Down arrow keys** to highlight earlier checkpoints.
-* The right side shows green lines (added code) and red lines (deleted code).
-* Press **Enter** to instantly jump back to that point in time.
-* Press **q** to quit.
+Boom! Your code and `.env` files are restored to exactly how they looked before the AI made its mistake.
 
 ---
 
-## 💡 Frequently Asked Questions
+## 📄 Summary Comparison
 
-### Do I need to understand Git to use this?
-**No.** Rewind was built specifically so you don't have to touch scary Git commands when an AI messes up. It handles all the snapshotting and restoring behind the scenes.
-
-### Will it slow down my computer or agent?
-**No.** Rewind saves checkpoints in less than 5 milliseconds (faster than the blink of an eye). You won't even notice it running.
-
-### What happens to my API keys and `.env` files?
-This is Rewind's superpower. Regular Git refuses to touch `.env` files for security reasons. But Rewind saves safe local backups in a private storage locker. If an AI accidentally wipes out your `.env`, Rewind puts it back in place immediately.
-
-### How is this different from regular `Ctrl+Z` in my code editor?
-`Ctrl+Z` in VS Code or Cursor only works inside one open file, and only if you haven't closed the tab. It cannot undo files that were deleted, and it cannot undo terminal commands. Rewind watches your entire project folder and restores everything at once.
+| Feature | Regular Git | GhostBranch |
+| :--- | :--- | :--- |
+| **Protects `.env` files?** | ❌ No (Git ignores them) | ✅ Yes (Automatic persistent CAS) |
+| **Undo without moving HEAD?** | ❌ Difficult | ✅ Instant (`ghostbranch undo 1`) |
+| **Survives `rm -rf .git`?** | ❌ Everything is lost | ✅ Fully survives & restores |
+| **Works with Claude / Cursor?** | ❌ Manual commits required | ✅ 100% automated |
+| **IDE Timeline Integration?** | ❌ Requires git extensions | ✅ Native VSCode Extension |
 
 ---
 
-## 🎯 Cheat Sheet
-
-| Command | What it does |
-|---|---|
-| `rewind run <agent>` | Starts your AI inside the flight recorder |
-| `rewind undo 1` | Undoes the last change the AI made |
-| `rewind undo 5` | Jumps back 5 steps |
-| `rewind ui` | Opens the visual timeline scrubber |
-| `rewind status` | Shows what session is currently active |
-
-Now you can let your AI code with peace of mind!
+MIT License. Built for high-assurance autonomous coding.

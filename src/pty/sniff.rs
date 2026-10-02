@@ -9,7 +9,23 @@ fn get_destructive_regex() -> &'static Regex {
     })
 }
 
-/// Detects destructive terminal commands in real-time stream buffers before they execute
+/// Strips ANSI escape codes from buffer and inspects for destructive shell patterns.
+/// If detected, emits a non-blocking warning without halting or blocking the process.
+/// Actual safety is guaranteed by the synchronous MCP pre-flight hook and notify incremental index.
+pub fn sniff_and_warn_destructive(bytes: &[u8]) -> bool {
+    let stripped = strip_ansi_escapes::strip(bytes);
+    let text = String::from_utf8_lossy(&stripped);
+
+    if get_destructive_regex().is_match(&text) {
+        tracing::warn!("GhostBranch: Destructive pattern detected in stream. Background snapshot secured.");
+        true
+    } else {
+        false
+    }
+}
+
 pub fn contains_destructive_pattern(text: &str) -> bool {
-    get_destructive_regex().is_match(text)
+    let stripped = strip_ansi_escapes::strip(text.as_bytes());
+    let clean = String::from_utf8_lossy(&stripped);
+    get_destructive_regex().is_match(&clean)
 }

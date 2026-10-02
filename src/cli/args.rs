@@ -2,9 +2,9 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "rewind",
-    version = "2.0.0",
-    about = "Rewind V2: High-performance local-first transaction layer & flight recorder for autonomous AI coding agents"
+    name = "ghostbranch",
+    version = "3.0.0",
+    about = "GhostBranch V3: Production-grade local-first transaction layer & flight recorder for autonomous AI coding agents"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -13,7 +13,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Run an AI coding agent inside the Rewind flight recorder
+    /// Run an AI coding agent inside the GhostBranch flight recorder
     Run {
         /// Target agent CLI executable and arguments
         #[arg(trailing_var_arg = true, required = true)]
@@ -24,13 +24,13 @@ pub enum Commands {
         dangerously_skip_permissions: bool,
     },
 
-    /// Shortcut for: rewind run claude [args...]
+    /// Shortcut for: ghostbranch run claude [args...]
     Claude {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
 
-    /// Shortcut for: rewind run aider [args...]
+    /// Shortcut for: ghostbranch run aider [args...]
     Aider {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
@@ -47,7 +47,7 @@ pub enum Commands {
         force: bool,
     },
 
-    /// Run garbage collection to prune old CAS blobs and enforce disk budget
+    /// Run reachability garbage collection to prune orphaned CAS blobs
     Gc {
         /// Max storage ceiling in Megabytes (default: 5000 MB)
         #[arg(long)]
@@ -55,7 +55,11 @@ pub enum Commands {
     },
 
     /// Display flight recorder status, storage consumption, and active session
-    Status,
+    Status {
+        /// Output status and checkpoints as JSON (for IDE and VSCode extensions)
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Start the synchronous PreToolUse HTTP hook server for agents
     ServeHooks {

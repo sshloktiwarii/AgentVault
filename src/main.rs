@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
+use serde_json::json;
 use std::sync::Arc;
-use rewind::cli::{Cli, Commands};
-use rewind::{HookServer, PtySession, RewindEngine};
+use ghostbranch::cli::{Cli, Commands};
+use ghostbranch::{GhostBranchEngine, HookServer, PtySession};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -11,12 +12,12 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { command, dangerously_skip_permissions: _ } => {
-            let engine = RewindEngine::new(&current_dir)?;
+            let engine = GhostBranchEngine::new(&current_dir)?;
             let agent_name = command.first().map(|s| s.as_str()).unwrap_or("agent");
             let session = engine.start_session(agent_name)?;
 
-            println!("\x1b[36m● Rewind V2 Active:\x1b[0m wrapping {} (Session: {})", agent_name, session.id);
-            println!("  Out-of-band store: {:?}", engine.cas.store_dir);
+            println!("\x1b[36m● GhostBranch V3 Active:\x1b[0m wrapping {} (Session: {})", agent_name, session.id);
+            println!("  Persistent store: {:?}", engine.cas.store_dir);
 
             // Spawn background synchronous hook server on port 4040
             let engine_hook_clone = engine.clone();
@@ -30,7 +31,7 @@ async fn main() -> Result<()> {
                 let _ = server.start().await;
             });
 
-            // Run agent command inside native PTY with stream sniffing
+            // Run agent command inside native PTY with non-blocking stream sniffing
             let pty = PtySession::new();
             let engine_pty_clone = engine.clone();
             let session_id_pty = session.id.clone();
@@ -49,10 +50,10 @@ async fn main() -> Result<()> {
         Commands::Claude { args } => {
             let mut full_cmd = vec!["claude".to_string()];
             full_cmd.extend(args);
-            let engine = RewindEngine::new(&current_dir)?;
+            let engine = GhostBranchEngine::new(&current_dir)?;
             let session = engine.start_session("claude")?;
 
-            println!("\x1b[36m● Rewind V2 Active:\x1b[0m wrapping claude (Session: {})", session.id);
+            println!("\x1b[36m● GhostBranch V3 Active:\x1b[0m wrapping claude (Session: {})", session.id);
 
             let engine_hook = engine.clone();
             let sid = session.id.clone();
@@ -80,10 +81,10 @@ async fn main() -> Result<()> {
         Commands::Aider { args } => {
             let mut full_cmd = vec!["aider".to_string()];
             full_cmd.extend(args);
-            let engine = RewindEngine::new(&current_dir)?;
+            let engine = GhostBranchEngine::new(&current_dir)?;
             let session = engine.start_session("aider")?;
 
-            println!("\x1b[36m● Rewind V2 Active:\x1b[0m wrapping aider (Session: {})", session.id);
+            println!("\x1b[36m● GhostBranch V3 Active:\x1b[0m wrapping aider (Session: {})", session.id);
 
             let engine_hook = engine.clone();
             let sid = session.id.clone();
@@ -109,7 +110,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Undo { steps, force } => {
-            let engine = RewindEngine::new(&current_dir)?;
+            let engine = GhostBranchEngine::new(&current_dir)?;
             match engine.rollback(steps, force) {
                 Ok(restored_cp) => {
                     println!("\x1b[32m✔ Codebase successfully rolled back {} step(s).\x1b[0m", steps);
@@ -125,54 +126,74 @@ async fn main() -> Result<()> {
         }
 
         Commands::Gc { max_mb } => {
-            let engine = RewindEngine::new(&current_dir)?;
-            let max_bytes = max_mb.map(|m| m * 1024 * 1024);
-            let stats = engine.run_gc(max_bytes)?;
+            let engine = GhostBranchEngine::new(&current_dir)?;
+            let stats = engine.run_gc(max_mb)?;
 
-            println!("\x1b[32m✔ Garbage collection complete:\x1b[0m");
+            println!("\x1b[32m✔ Reachability Garbage Collection complete:\x1b[0m");
             println!("  Blobs Scanned: {}", stats.blobs_scanned);
             println!("  Blobs Evicted: {}", stats.blobs_evicted);
             println!("  Bytes Reclaimed: {} bytes ({:.2} MB)", stats.bytes_evicted, stats.bytes_evicted as f64 / 1_048_576.0);
             println!("  Current CAS Footprint: {} bytes ({:.2} MB)", stats.total_remaining_bytes, stats.total_remaining_bytes as f64 / 1_048_576.0);
         }
 
-        Commands::Status => {
-            let engine = RewindEngine::new(&current_dir)?;
+        Commands::Status { json } => {
+            let engine = GhostBranchEngine::new(&current_dir)?;
             let latest = engine.ledger.get_latest_checkpoint()?;
             let total_cas_bytes = engine.ledger.get_total_cas_size()?;
+            let checkpoints = engine.ledger.get_all_checkpoints()?;
 
-            println!("\x1b[36mREWIND V2 FLIGHT RECORDER STATUS\x1b[0m");
-            println!("  Repository Root: {:?}", engine.repo_root);
-            println!("  Repository Hash: {}", engine.cas.repo_hash);
-            println!("  Out-of-Band Store: {:?}", engine.cas.store_dir);
-            println!("  Total CAS Size: {} bytes ({:.2} MB)", total_cas_bytes, total_cas_bytes as f64 / 1_048_576.0);
-
-            if let Some(cp) = latest {
-                println!("  Latest Checkpoint ID: {}", cp.id);
-                println!("  Latest Commit OID: {}", cp.git_commit_hash);
-                println!("  Trigger: {}", cp.trigger_type);
+            if json {
+                let output = json!({
+                    "repo_root": engine.repo_root.to_string_lossy(),
+                    "repo_identity": engine.cas.repo_hash,
+                    "store_path": engine.cas.store_dir.to_string_lossy(),
+                    "cas_size_bytes": total_cas_bytes,
+                    "latest_checkpoint": latest,
+                    "checkpoints": checkpoints.iter().map(|cp| {
+                        json!({
+                            "id": cp.id,
+                            "session_id": cp.session_id,
+                            "git_commit_hash": cp.git_commit_hash,
+                            "trigger_type": cp.trigger_type,
+                            "timestamp": cp.timestamp,
+                        })
+                    }).collect::<Vec<_>>()
+                });
+                println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
-                println!("  No checkpoints recorded yet.");
+                println!("\x1b[36mGHOSTBRANCH V3 FLIGHT RECORDER STATUS\x1b[0m");
+                println!("  Repository Root: {:?}", engine.repo_root);
+                println!("  Repository Identity: {}", engine.cas.repo_hash);
+                println!("  Persistent Store: {:?}", engine.cas.store_dir);
+                println!("  Total CAS Size: {} bytes ({:.2} MB)", total_cas_bytes, total_cas_bytes as f64 / 1_048_576.0);
+
+                if let Some(cp) = latest {
+                    println!("  Latest Checkpoint ID: {}", cp.id);
+                    println!("  Latest Commit OID: {}", cp.git_commit_hash);
+                    println!("  Trigger: {}", cp.trigger_type);
+                } else {
+                    println!("  No checkpoints recorded yet.");
+                }
             }
         }
 
         Commands::ServeHooks { port } => {
-            let engine = RewindEngine::new(&current_dir)?;
+            let engine = GhostBranchEngine::new(&current_dir)?;
             let trigger_fn = Arc::new(move |sid: &str, trigger: &str| {
                 let cp = engine.take_checkpoint(sid, trigger)?;
                 Ok((cp.id, cp.git_commit_hash))
             });
             let server = HookServer::new("standalone", trigger_fn, port);
-            println!("\x1b[36m● Starting Rewind Pre-Tool Hook Server on port {}\x1b[0m", port);
+            println!("\x1b[36m● Starting GhostBranch Pre-Tool Hook Server on port {}\x1b[0m", port);
             server.start().await?;
         }
 
         Commands::Ui => {
-            let engine = RewindEngine::new(&current_dir)?;
+            let engine = GhostBranchEngine::new(&current_dir)?;
             println!("\x1b[36m┌─────────────────────────────────────────────────────────────┐\x1b[0m");
-            println!("\x1b[36m│ REWIND FLIGHT RECORDER DASHBOARD                            │\x1b[0m");
+            println!("\x1b[36m│ GHOSTBRANCH FLIGHT RECORDER DASHBOARD                       │\x1b[0m");
             println!("\x1b[36m├─────────────────────────────────────────────────────────────┤\x1b[0m");
-            println!("│ Out-of-Band Cache: {:<40} │", engine.cas.store_dir.display());
+            println!("│ Persistent Store: {:<42} │", engine.cas.store_dir.display());
 
             if let Ok(Some(latest)) = engine.ledger.get_latest_checkpoint() {
                 if let Ok(cps) = engine.ledger.get_checkpoints_for_session(&latest.session_id) {

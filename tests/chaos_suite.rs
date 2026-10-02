@@ -6,9 +6,10 @@ use std::path::Path;
 use std::time::Instant;
 use tempfile::tempdir;
 
-use rewind::cas::{run_garbage_collection, CasStore};
-use rewind::daemon::{FileMetadata, IncrementalIndex};
-use rewind::RewindEngine;
+use ghostbranch::cas::{run_reachability_gc, CasStore};
+use ghostbranch::daemon::{FileMetadata, IncrementalIndex};
+use ghostbranch::db::Ledger;
+use ghostbranch::GhostBranchEngine;
 
 /// Helper to initialize a mock git repository with an initial commit
 fn init_mock_git_repo<P: AsRef<Path>>(path: P) -> Result<()> {
@@ -21,17 +22,17 @@ fn init_mock_git_repo<P: AsRef<Path>>(path: P) -> Result<()> {
     let mut index = repo.index()?;
     index.add_path(Path::new("README.md"))?;
     let tree_id = index.write_tree()?;
+    let message = format!("initial commit for {:?}", path.as_ref());
     {
         let tree = repo.find_tree(tree_id)?;
-        repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])?;
+        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?;
     }
     Ok(())
 }
 
-
-/// TEST 1: The `rm -rf .git` Survival Test (Proves Fix #3)
+/// TEST 1: The `rm -rf .git` Survival Test (Proves Fix #3 & Task 2)
 /// Wiping .git inside the target repository must never destroy the recovery insurance policy
-/// because Rewind stores all CAS blobs and SQLite ledgers completely out-of-band.
+/// because GhostBranch stores all CAS blobs and SQLite ledgers in persistent application data directories.
 #[test]
 fn test_rm_rf_git_survival() -> Result<()> {
     let temp_repo = tempdir()?;
@@ -42,7 +43,7 @@ fn test_rm_rf_git_survival() -> Result<()> {
     let env_path = repo_path.join(".env");
     fs::write(&env_path, "STRIPE_SECRET_KEY=sk_test_999\nDATABASE_URL=postgres://localhost\n")?;
 
-    let engine = RewindEngine::new(repo_path)?;
+    let engine = GhostBranchEngine::new(repo_path)?;
     let session = engine.start_session("test_agent")?;
 
     // Checkpoint 1: baseline with .env captured in CAS
@@ -64,7 +65,7 @@ fn test_rm_rf_git_survival() -> Result<()> {
     assert!(engine.cas.store_dir.exists());
     assert!(engine.cas.store_dir.join("metadata.db").exists());
 
-    // Reconstruct .git (or re-init) and verify out-of-band CAS manifests restore the lost .env
+    // Reconstruct and verify out-of-band CAS manifests restore the lost .env
     let manifest = engine.ledger.get_cas_manifest(cp1.id)?;
     assert!(!manifest.is_empty());
 
@@ -73,12 +74,12 @@ fn test_rm_rf_git_survival() -> Result<()> {
         .expect("Manifest must contain .env entry");
 
     // Restore .env directly from out-of-band CAS
-    let cas_entry = rewind::cas::CasManifestEntry {
+    let cas_entry = ghostbranch::cas::CasManifestEntry {
         relative_path: env_manifest_entry.file_path.clone(),
         blob_hash: env_manifest_entry.blob_hash.clone(),
         size_bytes: 0,
         permissions_mode: 0o600,
-        is_compressed: false,
+        is_compressed: env_manifest_entry.is_compressed,
         last_modified: 0,
     };
     engine.cas.restore_file(&cas_entry)?;
@@ -144,11 +145,12 @@ fn test_10k_file_delta_speed() -> Result<()> {
     Ok(())
 }
 
-/// TEST 3: The Disk Bomb GC Test (Proves Fix #4)
-/// Writes CAS data exceeding a budget limit, runs garbage collection,
-/// and asserts that the oldest blobs are evicted down to 80% ceiling.
+/// TEST 3: Reachability GC & Reference Counting Test (Proves Task 3)
+/// Writes CAS data exceeding a budget limit, triggers checkpoints,
+/// verifies ref_count tracking, and asserts reachability GC evicts oldest checkpoints
+/// and prunes orphaned unreferenced blobs.
 #[test]
-fn test_disk_bomb_gc() -> Result<()> {
+fn test_reachability_gc() -> Result<()> {
     let temp_store_dir = tempdir()?;
     let repo_dir = tempdir()?;
 
@@ -160,30 +162,40 @@ fn test_disk_bomb_gc() -> Result<()> {
     };
     fs::create_dir_all(&store.objects_dir)?;
 
-    // Define 10 MB ceiling budget
-    let max_budget_bytes: u64 = 10 * 1024 * 1024;
+    let ledger = Ledger::open(temp_store_dir.path().join("metadata.db"))?;
+    let session = ledger.create_session("mock_hash", "gc_agent")?;
 
-    // Create 15 individual 1 MB files (15 MB total, exceeding 10MB budget)
+    // Store 15 individual 1 MB blobs across 15 checkpoints (15 MB total)
     let payload = vec![0xABu8; 1024 * 1024]; // 1MB
     for i in 0..15 {
-        let file_path = repo_dir.path().join(format!("data_{}.sqlite", i));
+        let file_path = repo_dir.path().join(format!("secret_{}.env", i));
         let mut f = File::create(&file_path)?;
         f.write_all(&payload)?;
-        f.write_all(&[i as u8])?; // Ensure unique hash
-        let _ = store.store_file(&file_path)?;
+        f.write_all(&[i as u8])?; // Ensure unique content/hash
+        drop(f);
+
+        if let Some(entry) = store.store_file(&file_path)? {
+            ledger.insert_checkpoint(&session.id, &format!("commit_{}", i), "STEP", &[entry])?;
+        }
     }
 
-    // Run garbage collection
-    let stats = run_garbage_collection(&store, max_budget_bytes)?;
+    // Verify initial size
+    let initial_size = ledger.get_total_cas_size()?;
+    assert!(initial_size >= 15 * 1024 * 1024);
 
-    println!("GC Stats: {:?}", stats);
+    // Run reachability GC with a 10 MB ceiling (target ceiling = 80% = 8 MB)
+    let conn = ledger.get_connection();
+    let conn_guard = conn.lock().unwrap();
+    let stats = run_reachability_gc(10, &conn_guard, &store.objects_dir)?;
+
+    println!("Reachability GC Stats: {:?}", stats);
 
     // Assert eviction occurred
     assert!(stats.blobs_evicted > 0, "Blobs must be evicted");
     assert!(stats.bytes_evicted > 0, "Bytes must be reclaimed");
 
     // Assert total remaining storage is <= 80% of max budget (8 MB)
-    let target_ceiling = (max_budget_bytes as f64 * 0.8) as u64;
+    let target_ceiling = (10.0 * 1024.0 * 1024.0 * 0.8) as u64;
     assert!(
         stats.total_remaining_bytes <= target_ceiling,
         "Remaining bytes ({}) must be <= target ceiling ({})",
@@ -203,7 +215,7 @@ fn test_pre_tool_hook_race() -> Result<()> {
     let repo_path = temp_repo.path();
     let _ = init_mock_git_repo(repo_path)?;
 
-    let engine = RewindEngine::new(repo_path)?;
+    let engine = GhostBranchEngine::new(repo_path)?;
     let session = engine.start_session("pre_hook_agent")?;
 
     // Simulate 50 rapid file edits
@@ -214,7 +226,7 @@ fn test_pre_tool_hook_race() -> Result<()> {
         idx.update_file(repo_path, &file_path)?;
     }
 
-    // Synchronous Pre-Tool Hook executes immediately (simulating agent about to execute a destructive command)
+    // Synchronous Pre-Tool Hook executes immediately
     let checkpoint = engine.take_checkpoint(&session.id, "PRE_TOOL_BASH_HOOK")?;
     assert!(checkpoint.id > 0);
 
@@ -237,7 +249,6 @@ fn test_pre_tool_hook_race() -> Result<()> {
     // Rollback 1 step to revert the destruction and land on pre-flight hook checkpoint
     let rolled_back_cp = engine.rollback(1, true)?;
     assert_eq!(rolled_back_cp.id, checkpoint.id);
-
 
     // Verify all 50 files were safely captured and completely restored
     for i in 0..50 {

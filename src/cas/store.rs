@@ -3,6 +3,8 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::config::resolve_storage_dir;
+
 /// Default maximum file size for individual CAS blobs (50 MB)
 pub const MAX_CAS_FILE_SIZE_BYTES: u64 = 50 * 1024 * 1024;
 
@@ -10,7 +12,8 @@ pub const MAX_CAS_FILE_SIZE_BYTES: u64 = 50 * 1024 * 1024;
 pub const DEFAULT_MAX_CAS_TOTAL_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 
 /// High-performance Content-Addressable Storage (CAS) for untracked secrets and configs.
-/// Stored strictly out-of-band to prevent `.git/` blast-radius destruction.
+/// Stored strictly out-of-band in persistent XDG/OS application data directory
+/// (`com.GhostBranch.GhostBranch/stores/<root_commit_hash>`) to guarantee immunity from OS cache sweepers.
 #[derive(Debug, Clone)]
 pub struct CasStore {
     pub repo_root: PathBuf,
@@ -30,21 +33,21 @@ pub struct CasManifestEntry {
 }
 
 impl CasStore {
-    /// Initialize or resolve the out-of-band CAS store for a given repository path.
+    /// Initialize or resolve the persistent out-of-band CAS store for a given repository path.
     pub fn new<P: AsRef<Path>>(repo_path: P) -> Result<Self> {
         let canonical_repo = dunce::canonicalize(repo_path.as_ref())
-            .context("Failed to canonicalize repository path")?;
-        
-        let path_str = canonical_repo.to_string_lossy();
-        let hash = blake3::hash(path_str.as_bytes()).to_hex().to_string();
+            .context("Failed to canonicalize repository path for CasStore")?;
 
-        let base_cache = dirs::cache_dir()
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp")).join(".cache"))
-            .join("rewind")
-            .join("stores")
-            .join(&hash);
+        let store_dir = resolve_storage_dir(&canonical_repo)
+            .context("Failed to resolve persistent storage directory")?;
 
-        let objects_dir = base_cache.join("cas_objects");
+        let repo_hash = store_dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let objects_dir = store_dir.join("cas_objects");
 
         fs::create_dir_all(&objects_dir)
             .with_context(|| format!("Failed to create CAS directory at {:?}", objects_dir))?;
@@ -53,14 +56,14 @@ impl CasStore {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&base_cache, fs::Permissions::from_mode(0o700));
+            let _ = fs::set_permissions(&store_dir, fs::Permissions::from_mode(0o700));
             let _ = fs::set_permissions(&objects_dir, fs::Permissions::from_mode(0o700));
         }
 
         Ok(Self {
             repo_root: canonical_repo,
-            repo_hash: hash,
-            store_dir: base_cache,
+            repo_hash,
+            store_dir,
             objects_dir,
         })
     }
@@ -97,20 +100,23 @@ impl CasStore {
         self.objects_dir.join(prefix).join(rest)
     }
 
-    /// Stores a file into the Content-Addressable Storage with transparent Blake3 hashing and LZ4 compression
+    /// Stores a file into the Content-Addressable Storage with transparent Blake3 hashing
+    /// and mandatory Level 3 Zstandard (zstd) compression for text/code files.
     pub fn store_file<P: AsRef<Path>>(&self, abs_path: P) -> Result<Option<CasManifestEntry>> {
         let path = abs_path.as_ref();
         if !path.exists() || !path.is_file() {
             return Ok(None);
         }
 
-        let metadata = fs::symlink_metadata(path)?;
+        let metadata = fs::symlink_metadata(path)
+            .with_context(|| format!("Failed to fetch metadata for {:?}", path))?;
         if metadata.len() > MAX_CAS_FILE_SIZE_BYTES {
             // Bypass files exceeding 50MB ceiling to prevent disk bloat
             return Ok(None);
         }
 
-        let mut file = File::open(path)?;
+        let mut file = File::open(path)
+            .with_context(|| format!("Failed to open file for CAS storage at {:?}", path))?;
         let mut raw_bytes = Vec::with_capacity(metadata.len() as usize);
         file.read_to_end(&mut raw_bytes)?;
 
@@ -118,8 +124,11 @@ impl CasStore {
         let blob_path = self.get_blob_path(&hash);
 
         let is_text = is_text_content(&raw_bytes);
-        let (write_bytes, is_compressed) = if is_text && raw_bytes.len() > 64 {
-            (lz4_flex::compress_prepend_size(&raw_bytes), true)
+        // Level 3 zstd compression for text content
+        let (write_bytes, is_compressed) = if is_text && raw_bytes.len() > 32 {
+            let compressed = zstd::encode_all(&raw_bytes[..], 3)
+                .context("Failed to compress CAS blob using zstd level 3")?;
+            (compressed, true)
         } else {
             (raw_bytes, false)
         };
@@ -172,20 +181,21 @@ impl CasStore {
         }))
     }
 
-    /// Restores a file from CAS blob to its physical target path
+    /// Restores a file from CAS blob to its physical target path with zstd decompression
     pub fn restore_file(&self, entry: &CasManifestEntry) -> Result<()> {
         let blob_path = self.get_blob_path(&entry.blob_hash);
         if !blob_path.exists() {
             anyhow::bail!("CAS blob not found for hash: {}", entry.blob_hash);
         }
 
-        let mut blob_file = File::open(&blob_path)?;
+        let mut blob_file = File::open(&blob_path)
+            .with_context(|| format!("Failed to open CAS blob at {:?}", blob_path))?;
         let mut blob_bytes = Vec::new();
         blob_file.read_to_end(&mut blob_bytes)?;
 
         let raw_bytes = if entry.is_compressed {
-            lz4_flex::decompress_size_prepended(&blob_bytes)
-                .context("Failed to decompress LZ4 CAS blob")?
+            zstd::decode_all(&blob_bytes[..])
+                .context("Failed to decompress zstd CAS blob")?
         } else {
             blob_bytes
         };
@@ -195,7 +205,8 @@ impl CasStore {
             fs::create_dir_all(parent)?;
         }
 
-        let mut target_file = File::create(&target_path)?;
+        let mut target_file = File::create(&target_path)
+            .with_context(|| format!("Failed to create restore target at {:?}", target_path))?;
         target_file.write_all(&raw_bytes)?;
 
         #[cfg(unix)]
@@ -208,7 +219,7 @@ impl CasStore {
     }
 }
 
-/// Simple heuristic to identify if buffer contains UTF-8 text (for safe LZ4 compression)
+/// Simple heuristic to identify if buffer contains UTF-8 text (for safe zstd compression)
 fn is_text_content(bytes: &[u8]) -> bool {
     let check_len = bytes.len().min(1024);
     if check_len == 0 {

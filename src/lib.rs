@@ -1,4 +1,5 @@
 pub mod cli;
+pub mod config;
 pub mod daemon;
 pub mod git;
 pub mod cas;
@@ -14,16 +15,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 pub use cas::{CasManifestEntry, CasStore, GcStats, DEFAULT_MAX_CAS_TOTAL_BYTES};
+pub use config::{get_app_data_dir, resolve_storage_dir};
 pub use daemon::{FileMetadata, IncrementalIndex, WatcherDaemon};
 pub use db::{CheckpointRecord, Ledger, SessionRecord};
-pub use git::GitEngine;
+pub use git::{derive_repo_identity, GitEngine};
 pub use pty::PtySession;
 pub use safety::{verify_safety_conflicts, SafetyLockError};
 pub use server::HookServer;
 
-/// Rewind V2 Primary Engine Coordinator
+/// GhostBranch V3 Primary Engine Coordinator
 #[derive(Clone)]
-pub struct RewindEngine {
+pub struct GhostBranchEngine {
     pub repo_root: PathBuf,
     pub cas: CasStore,
     pub ledger: Ledger,
@@ -32,7 +34,10 @@ pub struct RewindEngine {
     pub active_session: Arc<Mutex<Option<SessionRecord>>>,
 }
 
-impl RewindEngine {
+// Backwards-compatibility type alias
+pub type RewindEngine = GhostBranchEngine;
+
+impl GhostBranchEngine {
     pub fn new<P: AsRef<Path>>(repo_path: P) -> Result<Self> {
         let repo_root = dunce::canonicalize(repo_path.as_ref())
             .context("Failed to canonicalize repository root")?;
@@ -172,7 +177,7 @@ impl RewindEngine {
                 blob_hash: entry.blob_hash.clone(),
                 size_bytes: 0,
                 permissions_mode: 0o600,
-                is_compressed: false,
+                is_compressed: entry.is_compressed,
                 last_modified: 0,
             };
             let _ = self.cas.restore_file(&cas_entry);
@@ -187,9 +192,11 @@ impl RewindEngine {
         Ok(target_checkpoint.clone())
     }
 
-    /// Runs garbage collection enforcing max allowed storage
-    pub fn run_gc(&self, max_bytes: Option<u64>) -> Result<GcStats> {
-        let limit = max_bytes.unwrap_or(DEFAULT_MAX_CAS_TOTAL_BYTES);
-        cas::run_garbage_collection(&self.cas, limit)
+    /// Runs reachability garbage collection enforcing max allowed storage in Megabytes
+    pub fn run_gc(&self, max_mb: Option<u64>) -> Result<GcStats> {
+        let ceiling_mb = max_mb.unwrap_or(5000); // Default 5GB
+        let conn_arc = self.ledger.get_connection();
+        let conn = conn_arc.lock().unwrap();
+        cas::run_reachability_gc(ceiling_mb, &conn, &self.cas.objects_dir)
     }
 }
