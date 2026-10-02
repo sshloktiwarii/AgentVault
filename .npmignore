@@ -1,0 +1,6 @@
+# Build and development artifacts
+tests/
+.github/
+*.log
+.DS_Store
+*.tsbuildinfo
