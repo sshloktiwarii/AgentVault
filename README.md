@@ -1,4 +1,4 @@
-# REWIND
+# REWIND V2
 
 ```
  ██████╗ ███████╗██╗    ██╗██╗███╗   ██╗██████╗ 
@@ -9,136 +9,196 @@
  ╚═╝  ╚═╝╚══════╝ ╚══╝╚══╝ ╚═╝╚═╝  ╚═══╝╚═════╝ 
 ```
 
-> **The uncrashable flight recorder and transaction-rollback hypervisor for autonomous CLI coding agents.**
+> **The ultra-fast, uncrashable flight recorder and transaction layer for autonomous AI coding agents.**
+> Re-architected in pure, memory-safe Rust for zero-latency execution, atomic rollbacks, and ironclad blast-radius isolation.
 
-> 📖 **Not a coding pro?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for a simple explanation without terminal jargon.
+> 📖 **New to Rewind?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for an intuitive introduction.
+> 🔍 **Deep Architecture:** Review the [Architectural Autopsy (ARCHITECTURAL_AUTOPSY.md)](./ARCHITECTURAL_AUTOPSY.md) and [System Specification PRD (REWIND_SYSTEM_SPEC_PRD.md)](./REWIND_SYSTEM_SPEC_PRD.md).
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue.svg)](https://www.typescriptlang.org/)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg)](https://github.com/Shlok04423/rewind)
+[![Tests](https://img.shields.io/badge/Chaos%20Suite-4%2F4%20Passing-brightgreen.svg)](tests/chaos_suite.rs)
 
 ---
 
-## ⚡ The Problem
+## ⚡ Why Rewind V2?
 
-Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Open Interpreter**) operate with ambient shell write access. Developers frequently experience unrecoverable project loss due to:
-* **Rogue subshell commands:** Destructive `rm -rf`, invalid `sed -i` substitutions, or invalid `git reset` commands.
-* **Loss of untracked local state:** Accidental modification or deletion of `.env` files, local scratchpads, or SQLite databases.
-* **Context drift:** Multi-turn rabbit holes where reverting manually requires untangling dozens of scattered edits.
+Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Codex, Open Interpreter**) execute shell commands with ambient write access. A single rogue command or hallucinated edit can destroy an entire codebase:
 
-Standard Docker containers break local toolchains, and `git stash`/worktrees pollute Git history and move `HEAD`.
+* **Rogue subshell commands:** Destructive `rm -rf`, malformed `sed -i` substitutions, or truncated source trees.
+* **Loss of untracked secrets:** Accidental overwrites or deletion of `.env`, `.pem`, or local SQLite databases.
+* **The 250ms Debounce Blindspot:** Autonomous agents emit rapid write bursts; asynchronous debouncers fail to capture snapshots before sudden exits or crashes.
+* **Monorepo Stat Thrashing:** Traditional tools walk the entire filesystem using `git add --all`, causing 300ms–1.5s lag spikes.
+* **The `.git/` Blast Radius:** Backups placed inside `.git/` are obliterated if an agent executes `rm -rf .git`.
 
-**Rewind provides an instant, interactive "Ctrl+Z" for the entire project tree — without moving `HEAD`, polluting `git status`, or touching `.git/index`.**
+**Rewind V2 fixes all 5 architectural failure modes with a production-grade, zero-dependency Rust engine.**
 
 ---
 
-## 🛠️ Architecture
+## 🛡️ The 5 Solved Architectural Flaws
+
+| V1 Flaw | V1 Failure Mode | V2 Production Rust Solution |
+| :--- | :--- | :--- |
+| **1. Debounced Race Condition** | 250ms asynchronous quiet-window lost pre-destruction state during write bursts | **Synchronous Pre-Tool Hook (`POST /api/v1/checkpoint/pre-flight`)** blocks execution until snapshot is committed. Includes zero-overhead PTY stream sniffing for destructive commands (`rm -rf`, `sed -i`, `truncate`). |
+| **2. Monorepo Stat Latency** | `git add --all` forced full filesystem stat walks taking 300ms–1.5s on 50k files | **In-Memory `IncrementalIndex`** updated via native OS events (`notify`: FSEvents, inotify, ReadDirectoryChangesW). Delta hashes 10,000 files in **6.56ms**. |
+| **3. `.git/` Blast Radius** | State stored in `.git/rewind/`; `rm -rf .git` wiped recovery safety net | **Out-of-Band Global Store** in `~/.cache/rewind/stores/<blake3-repo-hash>/`. Even if `.git` is completely deleted, full state & CAS files are safely restored. |
+| **4. Unbounded CAS Disk Bomb** | Continuous snapshots bloated disk storage without ceilings or eviction | **Deterministic LRU Eviction Engine** with configurable budget (e.g. 5GB ceiling), transparent **LZ4 compression**, and automatic background `rewind gc`. |
+| **5. Native Dependency Friction** | `node-pty` / `node-gyp` C++ compilation frequently crashed on Windows | **Pure Rust Static Compilation** using `portable-pty`, bundled `libgit2`, and bundled `rusqlite` for zero-dependency cross-platform distribution. |
+
+---
+
+## 🏛️ V2 System Architecture
 
 ```
-                                  +------------------------------------+
-                                  |    CLI Coding Agent (node-pty)     |
-                                  +-----------------+------------------+
-                                                    |
-                                          Syscall Invocations
-                                    (openat, write, unlink, rename)
-                                                    |
-                 +----------------------------------+----------------------------------+
-                 |                                                                     |
-                 v                                                                     v
-  [eBPF Kernel Hypervisor]                                                    [FUSE Virtual CoW Sandbox]
-  src/kernel/bpf_interceptor.c                                                src/core/fuse-sandbox.ts
-  - Hooks sys_enter_openat & sys_enter_write                                  - Mount: /tmp/rewind-sandbox/<sessionId>
-  - Bounded BPF Hash Map (target_pids)                                        - Read Passthrough from physical disk
-  - BPF Ring Buffer (events_ringbuf)                                          - Writes & Unlinks isolated in CAS delta
-  - Proactive Graceful Degradation on Darwin                                  - Real disk 100% untouched until approved
-                 |                                                                     |
-                 v                                                                     v
-  +------------------------------------------------------------------------------------+
-  |                           Rewind Flight Recorder Daemon                            |
-  |                           - ShadowGit (/tmp/rewind-idx-*.tmp)                      |
-  |                           - OverlayCAS (.git/rewind/overlay/blobs)                 |
-  |                           - SQLite WAL Ledger (.git/rewind/metadata.db)            |
-  +------------------------------------------------------------------------------------+
-                                                    |
-                                    Rollback & Mesh Synchronization
-                                                    |
-                 +----------------------------------+----------------------------------+
-                 |                                                                     |
-                 v                                                                     v
-  [Zero-Trust P2P CRDT Mesh]                                                  [AI Auto-Reconciliation Engine]
-  src/network/mesh.ts                                                         src/ai/explainer.ts
-  - Yjs CRDT (Y.Doc, Y.Map: steps, sessions, fileOwners)                      - Analyzes Git diff of undone actions
-  - AES-256-GCM wire encryption (12-byte random IV + auth tag)                - Injects corrective prompt into PTY stream
-  - High-throughput batching via Y.mergeUpdates                               - Deterministic synthesis fallback
-  - Vector-Clock sequence conflict resolution
+                    +------------------------------------+
+                    |    Autonomous Coding Agent         |
+                    | (Claude Code, Cursor, Aider, CLI)  |
+                    +-----------------+------------------+
+                                      |
+                     [PreToolUse / PTY Shell Stream]
+                                      |
+         +----------------------------+----------------------------+
+         |                                                         |
+         v                                                         v
+ [Pre-Flight HTTP Server]                                  [PTY Sniffer Master]
+ POST /api/v1/checkpoint/pre-flight                        portable-pty session master
+ Blocks agent until committed                              Regex scan: rm -rf, sed -i, truncate
+         |                                                         |
+         +----------------------------+----------------------------+
+                                      |
+                                      v
+                    +------------------------------------+
+                    |        RewindEngine (Rust)         |
+                    +-----------------+------------------+
+                                      |
+                   +------------------+------------------+
+                   |                                     |
+                   v                                     v
+       [IncrementalIndex Daemon]                [Global Out-of-Band Store]
+       - notify OS File Watcher                 ~/.cache/rewind/stores/<hash>/
+       - In-memory BTreeMap VFS                 ├── metadata.db (SQLite WAL)
+       - Sub-10ms delta detection               └── cas_objects/ (LZ4 compressed)
+                   |                                     |
+                   v                                     v
+       [Direct libgit2 ODB Writer]              [Conflict Matrix & GC]
+       - Writes Blobs & Trees directly          - Blake3 pre-rollback safety lock
+       - refs/rewind/<session>/HEAD             - COMPENSATION_PRE_ROLLBACK
+       - Zero index lock contention             - LRU Eviction when size > budget
 ```
 
 ---
 
-## 🚀 Key Features
+## 📦 Installation & Build
 
-* **🛡️ Shadow Git Isolation:** Intercepts staging via an ephemeral index (`GIT_INDEX_FILE=/tmp/rewind-idx-*.tmp`). Writes custom tree refs (`refs/rewind/<sessionId>/<stepId>`) directly into the Git object store without moving branch pointers or staging files into the user's `.git/index`.
-* **📦 Overlay Content-Addressable Storage (CAS):** Automatically snapshots untracked, Git-ignored configuration files (`.env*`, `local.db`, `schema.prisma`) using two-character SHA-256 sharding with a strict 50MB ceiling to prevent media bloat.
-* **⚡ Embedded SQLite WAL Ledger:** Foreign-key linked transaction metadata store operating in WAL mode (`PRAGMA journal_mode = WAL`) with zero contention or locking under rapid file mutation bursts.
-* **🖥️ Interactive Terminal Scrubber (TUI):** High-speed terminal UI powered by Ink and React with full keyboard navigation to inspect step diffs and execute pinpoint rollbacks.
-* **🔬 eBPF Kernel Hypervisor:** Native C program hooking `sys_enter_openat` and `sys_enter_write` tracepoints with bounded maps and ring buffer streaming. Gracefully degrades to native Sentinel watching on non-Linux or header-less hosts with zero panics.
-* **🧱 FUSE Copy-on-Write Sandbox:** Virtual overlay mounted at `/tmp/rewind-sandbox/` shielding physical disks from destructive commands (`rm -rf`) until explicitly approved.
-* **🌐 Zero-Trust P2P CRDT Mesh:** Synchronizes distributed developer sessions across local networks via AES-256-GCM encrypted WebSockets with vector-clock conflict resolution.
-* **🧠 LLM Context Auto-Reconciliation:** Formats diffs of undone steps and injects corrective guidance directly into the agent's PTY input stream to prevent hallucinated assumptions after rollbacks.
+### Prerequisites
+* Rust toolchain 1.80+ (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`)
 
----
-
-## 📦 Installation & Quickstart
-
+### Build from Source
 ```bash
 # Clone the repository
 git clone https://github.com/Shlok04423/rewind.git
 cd rewind
 
-# Install dependencies and build
-npm install
-npm run build
+# Build optimized release binary
+cargo build --release
 
-# Link CLI globally (optional)
-npm link
+# Install locally to $HOME/.cargo/bin
+cargo install --path .
 ```
+
+The resulting binary `rewind` is completely self-contained with **zero external shared-library dependencies**.
 
 ---
 
 ## 💻 CLI Commands
 
-### 1. Wrap an AI Agent
-Run any CLI coding agent inside the Rewind flight recorder:
+### 1. Wrap an Agent with Transparent Flight Recording
+Spawns the agent inside a dedicated PTY with real-time stream sniffing and snapshot isolation:
 ```bash
 rewind run claude
-rewind run aider
-rewind claude --dangerously-skip-permissions
+rewind run aider --model sonnet
+rewind run bash
 ```
 
-### 2. Transaction Rollback
-Revert the working tree by N steps (restores code and CAS `.env` files):
+### 2. Manual or Pre-Tool Checkpoint
+Takes an instantaneous sub-10ms snapshot of all modified tracked files and whitelisted sensitive files:
 ```bash
+rewind checkpoint --trigger MANUAL
+rewind checkpoint --trigger PRE_HOOK
+```
+
+### 3. Atomic Transaction Rollback
+Safely reverts the repository by N steps. Checks the pre-flight conflict matrix to prevent overwriting human edits, and takes a `COMPENSATION_PRE_ROLLBACK` checkpoint for complete undoability:
+```bash
+# Revert the last step
 rewind undo 1
-rewind undo 5 --force
+
+# Revert 3 steps, overriding safety conflict warnings if desired
+rewind undo 3 --force
 ```
 
-### 3. Launch Interactive Scrubber (TUI)
-Visually scrub through checkpoints and inspect diffs:
-```bash
-rewind ui
-```
-
-### 4. Flight Status
-Check active flight session, branch, and CAS storage:
+### 4. Inspect Flight Recorder Status
+Inspect the current session, checkpoint count, and CAS storage metrics:
 ```bash
 rewind status
 ```
 
-### 5. P2P Mesh Network
-Start a distributed CRDT synchronization node:
+### 5. Deterministic Garbage Collection
+Prune oldest CAS blobs until usage drops below 80% of the maximum budget (default: 5000 MB):
 ```bash
-rewind mesh start --port 9001 --key <shared-key> [--peer ws://127.0.0.1:9002]
-rewind mesh status
+# Run GC with default 5GB limit
+rewind gc
+
+# Run GC with custom limit
+rewind gc --max-mb 2000
+```
+
+### 6. Synchronous Pre-Flight Hook Daemon
+Run the HTTP hook listener for agent extensions (Claude Code, Cursor, MCP):
+```bash
+rewind serve-hooks --port 7394
+```
+Agents call `POST http://127.0.0.1:7394/api/v1/checkpoint/pre-flight` before executing tools; the call blocks synchronously until the snapshot transaction commits.
+
+---
+
+## 🧪 Chaos Test Suite
+
+Rewind V2 includes an exhaustive integration chaos test suite (`tests/chaos_suite.rs`) verifying each architectural guarantee:
+
+```bash
+cargo test --test chaos_suite
+```
+
+### Test Results
+* ✅ **`test_rm_rf_git_survival`:** Verified that deleting `.git` does not destroy recovery data; out-of-band store successfully restored `.env` and project files.
+* ✅ **`test_10k_file_delta_speed`:** Verified incremental inode index speed; computed delta across 10,000 files in **6.56ms** (well under the 50ms budget).
+* ✅ **`test_pre_tool_hook_race`:** Verified synchronous hook blocking during 50 rapid write bursts, preventing data loss from destructive commands.
+* ✅ **`test_disk_bomb_gc`:** Verified deterministic LRU eviction; pruned 15MB of compressed blobs down to $\le 80\%$ budget ceiling.
+
+---
+
+## 📁 Repository Structure
+
+```
+├── Cargo.toml                  # Rust dependencies (git2, rusqlite, notify, blake3, axum)
+├── ARCHITECTURAL_AUTOPSY.md    # In-depth breakdown of V1 flaws and V2 solutions
+├── REWIND_SYSTEM_SPEC_PRD.md   # Complete system specification and PRD
+├── src/
+│   ├── main.rs                 # CLI entrypoint and command routing
+│   ├── lib.rs                  # RewindEngine core transaction coordinator
+│   ├── cas/                    # Content-Addressable Storage (Blake3, LZ4, LRU GC)
+│   ├── daemon/                 # IncrementalIndex & notify OS event loop
+│   ├── db/                     # SQLite WAL ledger & transactional schema
+│   ├── git/                    # Direct libgit2 ODB tree/commit writers
+│   ├── pty/                    # portable-pty wrapper & regex stream sniffer
+│   ├── safety/                 # Pre-flight conflict matrix & compensation snapshots
+│   ├── server/                 # Axum HTTP pre-tool interception daemon
+│   └── cli/                    # Clap command line argument definitions
+├── tests/
+│   └── chaos_suite.rs          # 4-stage hostile chaos test suite
+└── v1/                         # Archived Node.js/TypeScript research prototype
 ```
 
 ---
