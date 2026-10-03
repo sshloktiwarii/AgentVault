@@ -6,7 +6,7 @@
   "publisher": "AgentVault",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Shlok04423/agentvault"
+    "url": "https://github.com/sshloktiwarii/agentvault"
   },
   "engines": {
     "vscode": "^1.80.0"

@@ -17,8 +17,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.80%2B-orange.svg)](https://www.rust-lang.org/)
-[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg)](https://github.com/Shlok04423/AgentVault)
-[![CI](https://github.com/Shlok04423/AgentVault/actions/workflows/ci.yml/badge.svg)](https://github.com/Shlok04423/AgentVault/actions/workflows/ci.yml)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg)](https://github.com/sshloktiwarii/AgentVault)
+[![CI](https://github.com/sshloktiwarii/AgentVault/actions/workflows/ci.yml/badge.svg)](https://github.com/sshloktiwarii/AgentVault/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/Test%20Suite-8%2F8%20Passing-brightgreen.svg)](tests/)
 
 
@@ -99,12 +99,12 @@ Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Co
 ## 📦 Installation & Build
 
 ### Option 1: Pre-Compiled Binary
-Download the pre-compiled binary for your architecture from the [GitHub Releases](https://github.com/Shlok04423/agentvault/releases).
+Download the pre-compiled binary for your architecture from the [GitHub Releases](https://github.com/sshloktiwarii/agentvault/releases).
 
 ### Option 2: Build from Source
 ```bash
 # Clone the repository
-git clone https://github.com/Shlok04423/agentvault.git
+git clone https://github.com/sshloktiwarii/agentvault.git
 cd agentvault
 
 # Build optimized release binary

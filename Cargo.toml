@@ -2,10 +2,10 @@
 name = "agentvault"
 version = "4.0.0"
 edition = "2021"
-authors = ["Shlok Tiwari <73051529+Shlok04423@users.noreply.github.com>"]
+authors = ["Shlok Tiwari"]
 description = "AgentVault: Production-grade local-first transaction layer and flight recorder for autonomous AI coding agents"
 license = "MIT"
-repository = "https://github.com/Shlok04423/agentvault"
+repository = "https://github.com/sshloktiwarii/agentvault"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
