@@ -11,6 +11,12 @@ pub struct PtySession {
     pub is_running: Arc<AtomicBool>,
 }
 
+impl Default for PtySession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PtySession {
     pub fn new() -> Self {
         Self {

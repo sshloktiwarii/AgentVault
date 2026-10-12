@@ -37,7 +37,7 @@ fn init_mock_git_repo<P: AsRef<Path>>(path: P) -> Result<()> {
 fn test_rm_rf_git_survival() -> Result<()> {
     let temp_repo = tempdir()?;
     let repo_path = temp_repo.path();
-    let _ = init_mock_git_repo(repo_path)?;
+    init_mock_git_repo(repo_path)?;
 
     // Create a critical secret .env file
     let env_path = repo_path.join(".env");
@@ -213,7 +213,7 @@ fn test_reachability_gc() -> Result<()> {
 fn test_pre_tool_hook_race() -> Result<()> {
     let temp_repo = tempdir()?;
     let repo_path = temp_repo.path();
-    let _ = init_mock_git_repo(repo_path)?;
+    init_mock_git_repo(repo_path)?;
 
     let engine = AgentVaultEngine::new(repo_path)?;
     let session = engine.start_session("pre_hook_agent")?;

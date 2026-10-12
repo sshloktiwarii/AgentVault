@@ -17,10 +17,8 @@ pub fn derive_repo_identity(repo_path: &Path) -> Result<String> {
             let mut revwalk = repo.revwalk()?;
             if revwalk.push_head().is_ok() {
                 let mut root_oid = None;
-                for oid in revwalk {
-                    if let Ok(oid) = oid {
-                        root_oid = Some(oid);
-                    }
+                for oid in revwalk.flatten() {
+                    root_oid = Some(oid);
                 }
                 if let Some(oid) = root_oid {
                     return Ok(blake3::hash(oid.as_bytes()).to_hex().to_string());
