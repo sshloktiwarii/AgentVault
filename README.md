@@ -12,7 +12,7 @@
 > **The ultra-fast, uncrashable flight recorder and transaction layer for autonomous AI coding agents.**
 > Re-architected in pure, memory-safe Rust with persistent OS application data isolation, Reachability GC, Zstandard streaming compression, and native VSCode IDE timeline integration.
 
-> 📖 **New to AgentVault?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for an intuitive introduction.
+> **New to AgentVault?** Check out the [Plain-English Beginner's Guide (README.simple.md)](./README.simple.md) for an intuitive introduction.
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -24,7 +24,7 @@
 
 ---
 
-## ⚡ Why AgentVault V4?
+## Why AgentVault V4?
 
 Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Codex, Open Interpreter**) execute shell commands with ambient write access. A single rogue command or hallucinated edit can destroy an entire codebase:
 
@@ -39,7 +39,7 @@ Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Co
 
 ---
 
-## 🛡️ Architectural Evolutions (V3 → V4)
+## Architectural Evolutions (V3 → V4)
 
 | Flaw / Risk | Latent Failure Mode | AgentVault V4 Production Solution |
 | :--- | :--- | :--- |
@@ -55,7 +55,7 @@ Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Co
 
 ---
 
-## 🏛️ V4 System Architecture
+## V4 System Architecture
 
 ```
                     +------------------------------------+
@@ -96,7 +96,7 @@ Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Co
 
 ---
 
-## 📦 Installation & Build
+## Installation & Build
 
 ### Option 1: Pre-Compiled Binary
 Download the pre-compiled binary for your architecture from the [GitHub Releases](https://github.com/sshloktiwarii/agentvault/releases).
@@ -116,7 +116,7 @@ cargo install --path .
 
 ---
 
-## 💻 CLI Commands
+## CLI Commands
 
 ### 1. Wrap an Agent with Flight Recording
 ```bash
@@ -159,7 +159,7 @@ agentvault serve-hooks --port 4040
 
 ---
 
-## 🔌 VSCode & Cursor Extension
+## VSCode & Cursor Extension
 
 AgentVault includes a first-party TypeScript extension providing a native Timeline UI in VSCode and Cursor:
 
@@ -171,7 +171,7 @@ AgentVault includes a first-party TypeScript extension providing a native Timeli
 
 ---
 
-## 🧪 Chaos & Verification Test Suite
+## Chaos & Verification Test Suite
 
 AgentVault V4 includes an exhaustive chaos integration test suite:
 
@@ -180,18 +180,18 @@ cargo test
 ```
 
 ### Verification Results
-* ✅ **`test_rm_rf_git_survival`:** Verified that deleting `.git` leaves recovery data unharmed in persistent OS application directories; `.env` restored bit-for-bit.
-* ✅ **`test_10k_file_delta_speed`:** In-memory incremental inode index computed deltas across 10,000 files in **6.56ms** (<50ms budget).
-* ✅ **`test_pre_tool_hook_race`:** Synchronous pre-flight hook blocked execution during 50 rapid write bursts, preventing data loss from destructive commands.
-* ✅ **`test_reachability_gc`:** Verified reference-counting SQLite triggers; reachability GC pruned oldest checkpoints and unreferenced blobs below budget ceiling.
-* ✅ **`test_reconcile_trigger_drift`:** Verified startup reconciliation heals trigger drift induced by crash interruptions.
-* ✅ **`test_repo_identity_derivation`:** Verified immutable root commit hashing, shallow clone warnings, and uncommitted path hashing fallback.
-* ✅ **`test_pty_sniff_ansi_destructive_detection`:** Verified non-blocking ANSI-stripped detection of destructive commands.
-* ✅ **`test_rollback_to_checkpoint_id`:** Verified direct rollback to arbitrary checkpoint IDs.
+* **`test_rm_rf_git_survival`:** Verified that deleting `.git` leaves recovery data unharmed in persistent OS application directories; `.env` restored bit-for-bit.
+* **`test_10k_file_delta_speed`:** In-memory incremental inode index computed deltas across 10,000 files in **6.56ms** (<50ms budget).
+* **`test_pre_tool_hook_race`:** Synchronous pre-flight hook blocked execution during 50 rapid write bursts, preventing data loss from destructive commands.
+* **`test_reachability_gc`:** Verified reference-counting SQLite triggers; reachability GC pruned oldest checkpoints and unreferenced blobs below budget ceiling.
+* **`test_reconcile_trigger_drift`:** Verified startup reconciliation heals trigger drift induced by crash interruptions.
+* **`test_repo_identity_derivation`:** Verified immutable root commit hashing, shallow clone warnings, and uncommitted path hashing fallback.
+* **`test_pty_sniff_ansi_destructive_detection`:** Verified non-blocking ANSI-stripped detection of destructive commands.
+* **`test_rollback_to_checkpoint_id`:** Verified direct rollback to arbitrary checkpoint IDs.
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```
 ├── Cargo.toml                  # Rust manifest (agentvault v4.0.0)
@@ -218,6 +218,6 @@ cargo test
 
 ---
 
-## 📄 License
+## License
 
 MIT License. Designed and engineered for high-assurance autonomous coding.

@@ -8,7 +8,7 @@ You don't need to be a terminal wizard or a Git expert to use AgentVault. This g
 
 ---
 
-## 🛑 The Problem: AIs Are Messy Roommates
+## The Problem: AIs Are Messy Roommates
 
 When an AI writes code on your computer, it doesn't just edit text files. It can run commands in your terminal. 
 
@@ -21,18 +21,18 @@ If you don't know advanced Git commands like `git reflog`, `git reset --hard`, o
 
 ---
 
-## 🛡️ What AgentVault Does
+## What AgentVault Does
 
 AgentVault acts like an **uncrashable black box flight recorder** running silently in the background while your AI works.
 
 ```
        AI makes a change (3:01 PM)  ───► AgentVault automatically saves a checkpoint
        AI makes a change (3:02 PM)  ───► AgentVault automatically saves a checkpoint
-       AI deletes your .env (3:03 PM) ───► 💥 DISASTER!
+       AI deletes your .env (3:03 PM) ───► DISASTER!
                                                 │
                                     Type: agentvault undo 1
                                                 ▼
-       Everything restored to 3:02 PM in 12 milliseconds! ✨
+       Everything restored to 3:02 PM in 12 milliseconds!
 ```
 
 * **Instant Undo:** Type `agentvault undo 1` and your whole project jumps back to before the AI made its mistake.
@@ -43,7 +43,7 @@ AgentVault acts like an **uncrashable black box flight recorder** running silent
 
 ---
 
-## 🚀 How to Use AgentVault in 3 Steps
+## How to Use AgentVault in 3 Steps
 
 ### Step 1: Install
 Download the binary for your operating system or install with Cargo:
@@ -75,7 +75,7 @@ Or open the timeline inside VSCode, right-click any checkpoint, and click **Rest
 
 ---
 
-## 🔒 What Makes AgentVault Different?
+## What Makes AgentVault Different?
 
 | Normal Git | AgentVault |
 |---|---|
