@@ -81,3 +81,7 @@ coverage/
 
 # Hyperframes brag video output
 brag-output/
+# System & temporary files
+*.swp
+__pycache__/
+*.pyc
