@@ -43,30 +43,48 @@ impl GitEngine {
     ) -> Result<Oid> {
         let repo = self.get_repo()?;
 
-        // Base tree: either from parent commit or empty tree
-        let mut tree_builder = if let Some(parent_oid) = parent_commit_oid {
+        // Use an in-memory index to build nested directory tree hierarchies properly
+        let mut index = repo.index()?;
+        index.clear()?;
+
+        // If a parent commit exists, seed index from its tree
+        let base_tree = if let Some(parent_oid) = parent_commit_oid {
             let parent_commit = repo.find_commit(parent_oid)?;
-            let parent_tree = parent_commit.tree()?;
-            repo.treebuilder(Some(&parent_tree))?
+            Some(parent_commit.tree()?)
         } else if let Ok(head_commit) = repo.head().and_then(|h| h.peel_to_commit()) {
-            let head_tree = head_commit.tree()?;
-            repo.treebuilder(Some(&head_tree))?
+            Some(head_commit.tree()?)
         } else {
-            repo.treebuilder(None)?
+            None
         };
 
-        // Apply deltas into the tree builder
+        if let Some(ref tree) = base_tree {
+            index.read_tree(tree)?;
+        }
+
+        // Apply deltas into the in-memory index
         for (rel_path, blob_oid, file_mode) in delta_entries {
-            // For root files or nested paths:
-            // Insert file mode (usually 0o100644 or 0o100755)
             let mode = match *file_mode {
                 FileMode::BlobExecutable => 0o100755,
                 _ => 0o100644,
             };
-            tree_builder.insert(rel_path, *blob_oid, mode)?;
+            let entry = git2::IndexEntry {
+                ctime: git2::IndexTime::new(0, 0),
+                mtime: git2::IndexTime::new(0, 0),
+                dev: 0,
+                ino: 0,
+                mode,
+                uid: 0,
+                gid: 0,
+                file_size: 0,
+                id: *blob_oid,
+                flags: 0,
+                flags_extended: 0,
+                path: rel_path.as_bytes().to_vec(),
+            };
+            index.add(&entry)?;
         }
 
-        let tree_oid = tree_builder.write()?;
+        let tree_oid = index.write_tree_to(&repo)?;
         let tree = repo.find_tree(tree_oid)?;
 
         let sig = Signature::now("AgentVault Flight Recorder", "agentvault@local.internal")?;

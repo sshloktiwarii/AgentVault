@@ -178,5 +178,31 @@ fn test_rollback_to_checkpoint_id() -> Result<()> {
     let content2 = fs::read_to_string(&file_path)?;
     assert_eq!(content2, "value: 2\n");
 
+    // Checkpoint 4: Nested path creation (src/cas/gc.rs) and git ls-tree inspection
+    let nested_dir = repo_path.join("src").join("cas");
+    fs::create_dir_all(&nested_dir)?;
+    let nested_file = nested_dir.join("gc.rs");
+    fs::write(&nested_file, "pub fn collect_garbage() {}")?;
+
+    let mut idx = engine.watcher.index.write().unwrap();
+    idx.update_file(repo_path, &nested_file)?;
+    drop(idx);
+
+    let cp4 = engine.take_checkpoint(&session.id, "NESTED_PATHS")?;
+    assert!(!cp4.git_commit_hash.is_empty());
+
+    // Inspect git commit tree with git CLI to prove nested structure is hierarchical
+    let output = std::process::Command::new("git")
+        .args(&["ls-tree", "-r", "--name-only", &cp4.git_commit_hash])
+        .current_dir(repo_path)
+        .output()?;
+
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout_str.contains("src/cas/gc.rs"),
+        "Expected git ls-tree to contain 'src/cas/gc.rs', got: {}",
+        stdout_str
+    );
+
     Ok(())
 }
