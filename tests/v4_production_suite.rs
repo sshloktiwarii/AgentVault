@@ -19,9 +19,10 @@ fn init_test_git_repo<P: AsRef<Path>>(path: P) -> Result<Repository> {
     let mut index = repo.index()?;
     index.add_path(Path::new("README.md"))?;
     let tree_id = index.write_tree()?;
+    let message = format!("root commit for {:?}", path.as_ref());
     {
         let tree = repo.find_tree(tree_id)?;
-        repo.commit(Some("HEAD"), &sig, &sig, "root commit", &tree, &[])?;
+        repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &[])?;
     }
     Ok(repo)
 }
@@ -202,6 +203,110 @@ fn test_rollback_to_checkpoint_id() -> Result<()> {
         stdout_str.contains("src/cas/gc.rs"),
         "Expected git ls-tree to contain 'src/cas/gc.rs', got: {}",
         stdout_str
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_security_fixes_av01_av02_av03() -> Result<()> {
+    let temp_repo = tempdir()?;
+    let repo_path = temp_repo.path();
+    let _ = init_test_git_repo(repo_path)?;
+
+    let engine = AgentVaultEngine::new(repo_path)?;
+    let session = engine.start_session("security_test_agent")?;
+
+    // --- AV-01: Path traversal validation in CasStore::restore_file ---
+    let real_env = repo_path.join(".env");
+    fs::write(&real_env, "SAFE_KEY=safe_value\n")?;
+    let manifest_entry = engine.cas.store_file(&real_env)?.expect("must store valid file");
+
+    let mut traversal_entry = manifest_entry.clone();
+    traversal_entry.relative_path = "../evil_traversal.txt".to_string();
+    let res = engine.cas.restore_file(&traversal_entry);
+    assert!(res.is_err(), "AV-01: CasStore::restore_file must reject ParentDir path traversal");
+
+    let mut root_entry = manifest_entry.clone();
+    root_entry.relative_path = "/etc/traversal.txt".to_string();
+    let res = engine.cas.restore_file(&root_entry);
+    assert!(res.is_err(), "AV-01: CasStore::restore_file must reject RootDir / absolute paths");
+
+    // --- AV-02: Symlink traversal rejection in CAS Checkpointing ---
+    #[cfg(unix)]
+    {
+        let outside_dir = tempdir()?;
+        let outside_secret = outside_dir.path().join("outside_secret.env");
+        fs::write(&outside_secret, "SUPER_SECRET_TOKEN=xyz\n")?;
+
+        let symlink_path = repo_path.join(".env.symlink");
+        std::os::unix::fs::symlink(&outside_secret, &symlink_path)?;
+
+        // store_file must reject symlinks
+        let store_res = engine.cas.store_file(&symlink_path)?;
+        assert!(store_res.is_none(), "AV-02: CasStore::store_file must reject symlinks");
+
+        // take_checkpoint must ignore symlinks and not record them into CAS manifest
+        let cp = engine.take_checkpoint(&session.id, "TEST_SYMLINK_CHECK")?;
+        let manifest = engine.ledger.get_cas_manifest(cp.id)?;
+        for entry in &manifest {
+            assert_ne!(
+                entry.file_path, ".env.symlink",
+                "AV-02: Symlink file must never be recorded into CAS manifest"
+            );
+        }
+    }
+
+    // --- AV-03: Hook API token validation ---
+    use agentvault::server::{validate_token, PreFlightRequest, ServerState};
+    use axum::http::{HeaderMap, StatusCode};
+    use std::sync::Arc;
+
+    let server_state = ServerState {
+        default_session_id: session.id.clone(),
+        trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
+        auth_token: Some("local_env_secret_token".to_string()),
+    };
+
+    // Valid session token in payload
+    let req_valid_session = PreFlightRequest {
+        tool_name: Some("test_tool".to_string()),
+        command: None,
+        session_id: Some(session.id.clone()),
+        token: None,
+    };
+    assert_eq!(
+        validate_token(&server_state, &HeaderMap::new(), &req_valid_session),
+        Ok(session.id.clone())
+    );
+
+    // Valid environment token in header
+    let mut auth_headers = HeaderMap::new();
+    auth_headers.insert(
+        axum::http::header::AUTHORIZATION,
+        "Bearer local_env_secret_token".parse().unwrap(),
+    );
+    let req_env_auth = PreFlightRequest {
+        tool_name: Some("test_tool".to_string()),
+        command: None,
+        session_id: None,
+        token: None,
+    };
+    assert_eq!(
+        validate_token(&server_state, &auth_headers, &req_env_auth),
+        Ok(session.id.clone())
+    );
+
+    // Invalid token rejected
+    let req_invalid = PreFlightRequest {
+        tool_name: Some("test_tool".to_string()),
+        command: None,
+        session_id: Some("malicious_hijacked_session".to_string()),
+        token: None,
+    };
+    assert_eq!(
+        validate_token(&server_state, &HeaderMap::new(), &req_invalid),
+        Err(StatusCode::UNAUTHORIZED)
     );
 
     Ok(())

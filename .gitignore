@@ -85,3 +85,7 @@ brag-output/
 *.swp
 __pycache__/
 *.pyc
+
+graphify-out/
+brag-output/
+

@@ -79,7 +79,14 @@ impl AgentVaultEngine {
         if let Ok(entries) = std::fs::read_dir(&self.repo_root) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.is_file() && CasStore::is_whitelisted(&path) {
+                let meta = match std::fs::symlink_metadata(&path) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if meta.file_type().is_symlink() || !meta.is_file() {
+                    continue;
+                }
+                if CasStore::is_whitelisted(&path) {
                     if let Ok(Some(cas_entry)) = self.cas.store_file(&path) {
                         cas_manifest.push(cas_entry);
                     }

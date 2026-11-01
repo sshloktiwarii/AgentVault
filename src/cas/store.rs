@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::config::resolve_storage_dir;
 
@@ -104,12 +104,15 @@ impl CasStore {
     /// and mandatory Level 3 Zstandard (zstd) stream compression for files.
     pub fn store_file<P: AsRef<Path>>(&self, abs_path: P) -> Result<Option<CasManifestEntry>> {
         let path = abs_path.as_ref();
-        if !path.exists() || !path.is_file() {
+        let metadata = match fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(_) => return Ok(None),
+        };
+
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Ok(None);
         }
 
-        let metadata = fs::symlink_metadata(path)
-            .with_context(|| format!("Failed to fetch metadata for {:?}", path))?;
         if metadata.len() > MAX_CAS_FILE_SIZE_BYTES {
             // Bypass files exceeding 50MB ceiling to prevent disk bloat
             return Ok(None);
@@ -195,7 +198,19 @@ impl CasStore {
             blob_bytes
         };
 
-        let target_path = self.repo_root.join(&entry.relative_path);
+        let rel = Path::new(&entry.relative_path);
+        if rel.is_absolute()
+            || rel
+                .components()
+                .any(|c| matches!(c, Component::ParentDir | Component::RootDir))
+        {
+            anyhow::bail!(
+                "Invalid or path traversal relative_path in CAS entry: {}",
+                entry.relative_path
+            );
+        }
+
+        let target_path = self.repo_root.join(rel);
         if let Some(parent) = target_path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -226,4 +241,78 @@ fn is_text_content(bytes: &[u8]) -> bool {
         return false;
     }
     std::str::from_utf8(&bytes[0..check_len]).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_restore_file_path_traversal_rejection() -> Result<()> {
+        let temp_dir = tempdir()?;
+        let store = CasStore {
+            repo_root: temp_dir.path().to_path_buf(),
+            repo_hash: "test_hash".to_string(),
+            store_dir: temp_dir.path().join("store"),
+            objects_dir: temp_dir.path().join("store").join("cas_objects"),
+        };
+        fs::create_dir_all(&store.objects_dir)?;
+
+        let real_file = temp_dir.path().join("sample.env");
+        fs::write(&real_file, "KEY=value")?;
+        let entry = store.store_file(&real_file)?.expect("should store file");
+
+        // 1. Absolute path traversal
+        let mut evil_entry = entry.clone();
+        evil_entry.relative_path = "/etc/passwd".to_string();
+        let res = store.restore_file(&evil_entry);
+        assert!(res.is_err(), "Absolute path must be rejected");
+
+        // 2. Parent directory traversal
+        let mut evil_entry2 = entry.clone();
+        evil_entry2.relative_path = "../escaped_secret.txt".to_string();
+        let res2 = store.restore_file(&evil_entry2);
+        assert!(res2.is_err(), "ParentDir must be rejected");
+
+        // 3. Subdir parent traversal
+        let mut evil_entry3 = entry.clone();
+        evil_entry3.relative_path = "sub/../../escaped_secret.txt".to_string();
+        let res3 = store.restore_file(&evil_entry3);
+        assert!(res3.is_err(), "Subdir ParentDir must be rejected");
+
+        // 4. Valid relative path succeeds
+        let mut valid_entry = entry.clone();
+        valid_entry.relative_path = "nested/restored.env".to_string();
+        let res4 = store.restore_file(&valid_entry);
+        assert!(res4.is_ok(), "Valid relative path should succeed");
+        assert!(temp_dir.path().join("nested/restored.env").exists());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_store_file_symlink_rejection() -> Result<()> {
+        let temp_dir = tempdir()?;
+        let store = CasStore {
+            repo_root: temp_dir.path().to_path_buf(),
+            repo_hash: "test_hash".to_string(),
+            store_dir: temp_dir.path().join("store"),
+            objects_dir: temp_dir.path().join("store").join("cas_objects"),
+        };
+        fs::create_dir_all(&store.objects_dir)?;
+
+        let target_file = temp_dir.path().join("target.env");
+        fs::write(&target_file, "SECRET=12345")?;
+
+        let symlink_file = temp_dir.path().join("symlink.env");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target_file, &symlink_file)?;
+            let stored = store.store_file(&symlink_file)?;
+            assert!(stored.is_none(), "Symlink must be rejected by store_file");
+        }
+
+        Ok(())
+    }
 }

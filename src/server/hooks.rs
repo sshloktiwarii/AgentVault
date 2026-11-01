@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PreFlightRequest {
     pub tool_name: Option<String>,
     pub command: Option<String>,
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -29,6 +31,7 @@ pub type CheckpointTriggerFn = Arc<dyn Fn(&str, &str) -> anyhow::Result<(i64, St
 pub struct ServerState {
     pub default_session_id: String,
     pub trigger_checkpoint: CheckpointTriggerFn,
+    pub auth_token: Option<String>,
 }
 
 pub struct HookServer {
@@ -38,13 +41,23 @@ pub struct HookServer {
 
 impl HookServer {
     pub fn new(default_session_id: &str, trigger_checkpoint: CheckpointTriggerFn, port: u16) -> Self {
+        let auth_token = std::env::var("AGENTVAULT_TOKEN")
+            .or_else(|_| std::env::var("AGENTVAULT_HOOK_TOKEN"))
+            .or_else(|_| std::env::var("AGENTVAULT_SESSION_TOKEN"))
+            .ok();
         Self {
             port,
             state: ServerState {
                 default_session_id: default_session_id.to_string(),
                 trigger_checkpoint,
+                auth_token,
             },
         }
+    }
+
+    pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.state.auth_token = Some(token.into());
+        self
     }
 
     pub fn router(state: ServerState) -> Router {
@@ -67,13 +80,114 @@ async fn health_check() -> &'static str {
     "AgentVault Hook Server Active"
 }
 
+/// Validates session or local environment tokens from request headers or payload.
+pub fn validate_token(
+    state: &ServerState,
+    headers: &HeaderMap,
+    payload: &PreFlightRequest,
+) -> Result<String, StatusCode> {
+    // 1. Gather candidate tokens from headers or JSON body
+    let mut candidate_tokens = Vec::new();
+
+    if let Some(auth_val) = headers.get(axum::http::header::AUTHORIZATION).and_then(|v| v.to_str().ok()) {
+        let token = if let Some(bearer) = auth_val.strip_prefix("Bearer ") {
+            bearer.trim()
+        } else {
+            auth_val.trim()
+        };
+        if !token.is_empty() {
+            candidate_tokens.push(token);
+        }
+    }
+
+    if let Some(tok) = headers.get("x-agentvault-token").and_then(|v| v.to_str().ok()) {
+        let trimmed = tok.trim();
+        if !trimmed.is_empty() {
+            candidate_tokens.push(trimmed);
+        }
+    }
+
+    if let Some(tok) = headers.get("x-session-token").and_then(|v| v.to_str().ok()) {
+        let trimmed = tok.trim();
+        if !trimmed.is_empty() {
+            candidate_tokens.push(trimmed);
+        }
+    }
+
+    if let Some(ref tok) = payload.token {
+        let trimmed = tok.trim();
+        if !trimmed.is_empty() {
+            candidate_tokens.push(trimmed);
+        }
+    }
+
+    // 2. Resolve local environment token dynamically or from state
+    let env_token = std::env::var("AGENTVAULT_TOKEN")
+        .or_else(|_| std::env::var("AGENTVAULT_HOOK_TOKEN"))
+        .or_else(|_| std::env::var("AGENTVAULT_SESSION_TOKEN"))
+        .ok();
+
+    let is_env_token_valid = |t: &str| -> bool {
+        if let Some(ref env_t) = env_token {
+            if !env_t.is_empty() && t == env_t {
+                return true;
+            }
+        }
+        if let Some(ref state_t) = state.auth_token {
+            if !state_t.is_empty() && t == state_t {
+                return true;
+            }
+        }
+        false
+    };
+
+    let is_session_token_valid = |t: &str| -> bool {
+        !state.default_session_id.is_empty() && t == state.default_session_id
+    };
+
+    // 3. If any provided token matches environment token or session token
+    let has_valid_token = candidate_tokens.iter().any(|&t| {
+        is_env_token_valid(t) || is_session_token_valid(t)
+    });
+
+    if has_valid_token {
+        let session_id = payload
+            .session_id
+            .as_deref()
+            .unwrap_or(&state.default_session_id);
+        return Ok(session_id.to_string());
+    }
+
+    // 4. Validate payload.session_id against the active session token
+    if let Some(ref req_sid) = payload.session_id {
+        if is_session_token_valid(req_sid) {
+            return Ok(req_sid.clone());
+        }
+    }
+
+    Err(StatusCode::UNAUTHORIZED)
+}
+
 /// Synchronous Pre-Tool Hook Handler (Solves Flaw #1: Debounced Race Condition)
 /// Blocks until the snapshot is fully hashed, tree-committed, and recorded in SQLite.
 async fn pre_flight_checkpoint(
     State(state): State<ServerState>,
+    headers: HeaderMap,
     Json(payload): Json<PreFlightRequest>,
 ) -> impl IntoResponse {
-    let session_id = payload.session_id.unwrap_or(state.default_session_id);
+    let session_id = match validate_token(&state, &headers, &payload) {
+        Ok(sid) => sid,
+        Err(status) => {
+            return (
+                status,
+                Json(serde_json::json!({
+                    "status": "ERROR",
+                    "error": "Unauthorized: invalid or missing session or environment token"
+                })),
+            );
+        }
+    };
+
     let trigger = payload.tool_name.unwrap_or_else(|| "PRE_TOOL_USE".to_string());
 
     match (state.trigger_checkpoint)(&session_id, &trigger) {
@@ -92,5 +206,100 @@ async fn pre_flight_checkpoint(
                 "error": err.to_string()
             })),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn test_valid_session_token_in_payload_session_id() {
+        let state = ServerState {
+            default_session_id: "sess_xyz_123".to_string(),
+            trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
+            auth_token: None,
+        };
+        let headers = HeaderMap::new();
+        let payload = PreFlightRequest {
+            tool_name: Some("test".to_string()),
+            command: None,
+            session_id: Some("sess_xyz_123".to_string()),
+            token: None,
+        };
+        assert_eq!(validate_token(&state, &headers, &payload), Ok("sess_xyz_123".to_string()));
+    }
+
+    #[test]
+    fn test_invalid_session_token_rejected() {
+        let state = ServerState {
+            default_session_id: "sess_xyz_123".to_string(),
+            trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
+            auth_token: None,
+        };
+        let headers = HeaderMap::new();
+        let payload = PreFlightRequest {
+            tool_name: Some("test".to_string()),
+            command: None,
+            session_id: Some("attacker_session".to_string()),
+            token: None,
+        };
+        assert_eq!(validate_token(&state, &headers, &payload), Err(StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn test_missing_token_rejected() {
+        let state = ServerState {
+            default_session_id: "sess_xyz_123".to_string(),
+            trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
+            auth_token: None,
+        };
+        let headers = HeaderMap::new();
+        let payload = PreFlightRequest {
+            tool_name: Some("test".to_string()),
+            command: None,
+            session_id: None,
+            token: None,
+        };
+        assert_eq!(validate_token(&state, &headers, &payload), Err(StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn test_valid_environment_token_in_header() {
+        let state = ServerState {
+            default_session_id: "sess_xyz_123".to_string(),
+            trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
+            auth_token: Some("secret_local_env_token".to_string()),
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            "Bearer secret_local_env_token".parse().unwrap(),
+        );
+        let payload = PreFlightRequest {
+            tool_name: Some("test".to_string()),
+            command: None,
+            session_id: None,
+            token: None,
+        };
+        assert_eq!(validate_token(&state, &headers, &payload), Ok("sess_xyz_123".to_string()));
+    }
+
+    #[test]
+    fn test_valid_environment_token_in_payload_token() {
+        let state = ServerState {
+            default_session_id: "sess_xyz_123".to_string(),
+            trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
+            auth_token: Some("secret_local_env_token".to_string()),
+        };
+        let headers = HeaderMap::new();
+        let payload = PreFlightRequest {
+            tool_name: Some("test".to_string()),
+            command: None,
+            session_id: Some("custom_session".to_string()),
+            token: Some("secret_local_env_token".to_string()),
+        };
+        assert_eq!(validate_token(&state, &headers, &payload), Ok("custom_session".to_string()));
     }
 }
