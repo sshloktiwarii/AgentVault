@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use subtle::ConstantTimeEq;
 use tokio::net::TcpListener;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -129,26 +130,20 @@ pub fn validate_token(
 
     let is_env_token_valid = |t: &str| -> bool {
         if let Some(ref env_t) = env_token {
-            if !env_t.is_empty() && t == env_t {
+            if !env_t.is_empty() && bool::from(t.as_bytes().ct_eq(env_t.as_bytes())) {
                 return true;
             }
         }
         if let Some(ref state_t) = state.auth_token {
-            if !state_t.is_empty() && t == state_t {
+            if !state_t.is_empty() && bool::from(t.as_bytes().ct_eq(state_t.as_bytes())) {
                 return true;
             }
         }
         false
     };
 
-    let is_session_token_valid = |t: &str| -> bool {
-        !state.default_session_id.is_empty() && t == state.default_session_id
-    };
-
-    // 3. If any provided token matches environment token or session token
-    let has_valid_token = candidate_tokens.iter().any(|&t| {
-        is_env_token_valid(t) || is_session_token_valid(t)
-    });
+    // 3. If any provided token matches environment token or state auth token in constant time
+    let has_valid_token = candidate_tokens.iter().any(|&t| is_env_token_valid(t));
 
     if has_valid_token {
         let session_id = payload
@@ -156,13 +151,6 @@ pub fn validate_token(
             .as_deref()
             .unwrap_or(&state.default_session_id);
         return Ok(session_id.to_string());
-    }
-
-    // 4. Validate payload.session_id against the active session token
-    if let Some(ref req_sid) = payload.session_id {
-        if is_session_token_valid(req_sid) {
-            return Ok(req_sid.clone());
-        }
     }
 
     Err(StatusCode::UNAUTHORIZED)
@@ -215,18 +203,45 @@ mod tests {
     use axum::http::HeaderMap;
 
     #[test]
-    fn test_valid_session_token_in_payload_session_id() {
+    fn test_default_session_id_bypass_rejected() {
         let state = ServerState {
             default_session_id: "sess_xyz_123".to_string(),
             trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
-            auth_token: None,
+            auth_token: Some("secret_token".to_string()),
+        };
+        let headers = HeaderMap::new();
+        // Request specifying default_session_id in payload with no token must be rejected
+        let payload = PreFlightRequest {
+            tool_name: Some("test".to_string()),
+            command: None,
+            session_id: Some("sess_xyz_123".to_string()),
+            token: None,
+        };
+        assert_eq!(validate_token(&state, &headers, &payload), Err(StatusCode::UNAUTHORIZED));
+
+        // Request with wrong token on default_session_id must also be rejected
+        let payload_wrong = PreFlightRequest {
+            tool_name: Some("test".to_string()),
+            command: None,
+            session_id: Some("sess_xyz_123".to_string()),
+            token: Some("wrong_token".to_string()),
+        };
+        assert_eq!(validate_token(&state, &headers, &payload_wrong), Err(StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn test_constant_time_token_check_valid() {
+        let state = ServerState {
+            default_session_id: "sess_xyz_123".to_string(),
+            trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
+            auth_token: Some("secret_token_constant_time".to_string()),
         };
         let headers = HeaderMap::new();
         let payload = PreFlightRequest {
             tool_name: Some("test".to_string()),
             command: None,
             session_id: Some("sess_xyz_123".to_string()),
-            token: None,
+            token: Some("secret_token_constant_time".to_string()),
         };
         assert_eq!(validate_token(&state, &headers, &payload), Ok("sess_xyz_123".to_string()));
     }
@@ -236,14 +251,14 @@ mod tests {
         let state = ServerState {
             default_session_id: "sess_xyz_123".to_string(),
             trigger_checkpoint: Arc::new(|_, _| Ok((1, "commit".to_string()))),
-            auth_token: None,
+            auth_token: Some("secret_token".to_string()),
         };
         let headers = HeaderMap::new();
         let payload = PreFlightRequest {
             tool_name: Some("test".to_string()),
             command: None,
             session_id: Some("attacker_session".to_string()),
-            token: None,
+            token: Some("invalid_token".to_string()),
         };
         assert_eq!(validate_token(&state, &headers, &payload), Err(StatusCode::UNAUTHORIZED));
     }

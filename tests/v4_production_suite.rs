@@ -268,15 +268,27 @@ fn test_security_fixes_av01_av02_av03() -> Result<()> {
         auth_token: Some("local_env_secret_token".to_string()),
     };
 
-    // Valid session token in payload
-    let req_valid_session = PreFlightRequest {
+    // Default session without valid token rejected (no authentication bypass)
+    let req_unauth_session = PreFlightRequest {
         tool_name: Some("test_tool".to_string()),
         command: None,
         session_id: Some(session.id.clone()),
         token: None,
     };
     assert_eq!(
-        validate_token(&server_state, &HeaderMap::new(), &req_valid_session),
+        validate_token(&server_state, &HeaderMap::new(), &req_unauth_session),
+        Err(StatusCode::UNAUTHORIZED)
+    );
+
+    // Valid token in payload
+    let req_valid_payload_token = PreFlightRequest {
+        tool_name: Some("test_tool".to_string()),
+        command: None,
+        session_id: Some(session.id.clone()),
+        token: Some("local_env_secret_token".to_string()),
+    };
+    assert_eq!(
+        validate_token(&server_state, &HeaderMap::new(), &req_valid_payload_token),
         Ok(session.id.clone())
     );
 
