@@ -27,6 +27,14 @@
 
 ---
 
+## 📌 Repository Metadata
+
+* **About**: Ultra-fast, uncrashable in-memory Git flight recorder & transaction layer for autonomous AI coding agents.
+* **Description**: Re-architected in pure, memory-safe Rust with persistent OS application data isolation, Reachability GC, Zstandard streaming compression, crash-resilient root-commit identity derivation, and native VSCode IDE timeline integration. Intercepts destructive subshell commands before damage occurs.
+* **Topics & Tags**: `agentvault`, `ai-agents`, `git`, `flight-recorder`, `rust`, `vscode-extension`, `transaction-layer`, `safety`, `developer-tools`, `claude-code`, `cursor`
+
+---
+
 ## Why AgentVault V4?
 
 Autonomous CLI coding agents (**Claude Code, Cursor background agents, Aider, Codex, Open Interpreter**) execute shell commands with ambient write access. A single rogue command or hallucinated edit can destroy an entire codebase:
