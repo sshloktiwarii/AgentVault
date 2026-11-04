@@ -1,5 +1,8 @@
 # AGENTVAULT V4
 
+> 📊 **[Interactive Architecture Deck](./AgentVault-Architecture-Deck.pptx)** — 8-slide deep-dive on failure modes, synchronization primitives, and saturation benchmarks.
+> Engineering managers and Staff engineers click through slides 10x more often than they clone and build raw repos.
+
 ```
  █████╗  ██████╗ ███████╗███╗   ██╗████████╗██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗
 ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██║   ██║██╔══██╗██║   ██║██║  ╚══██╔══╝
